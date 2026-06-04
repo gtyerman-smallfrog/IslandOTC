@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Island IO · Enterprise Browser Dashboard</title>
+  <meta name="description" content="GUI dashboard for the Island Enterprise Browser API — devices, users, compromised credentials, audit events and admin actions." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏝️</text></svg>" />
+  <link rel="stylesheet" href="assets/css/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">🏝️</span>
+        <div>
+          <div class="brand-name">Island IO</div>
+          <div class="brand-sub">Enterprise Browser</div>
+        </div>
+      </div>
+      <nav class="tabs">
+        <button class="tab active" data-tab="overview"><span>📊</span> Overview</button>
+        <button class="tab" data-tab="devices"><span>🖥️</span> Devices</button>
+        <button class="tab" data-tab="users"><span>👤</span> Users</button>
+        <button class="tab" data-tab="credentials"><span>🔑</span> Credentials</button>
+        <button class="tab" data-tab="events"><span>🛡️</span> Audit Events</button>
+        <button class="tab" data-tab="admin"><span>⚙️</span> Admin Actions</button>
+      </nav>
+      <div class="sidebar-foot">
+        <div id="dataStatus" class="data-status">Loading…</div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <header class="topbar">
+        <div class="search">
+          <span>🔎</span>
+          <input id="globalSearch" type="search" placeholder="Search devices, users, events…" autocomplete="off" />
+        </div>
+        <div class="topbar-actions">
+          <button id="refreshBtn" class="btn" title="Reload data">↻ Refresh</button>
+          <button id="settingsBtn" class="btn btn-ghost" title="Configure data source">⚙️ Settings</button>
+        </div>
+      </header>
+
+      <div class="content">
+        <!-- Overview -->
+        <section id="panel-overview" class="panel active">
+          <div id="kpis" class="kpi-row"></div>
+
+          <div class="grid grid-2">
+            <div class="card span-2">
+              <div class="card-head"><h3>Browser events — last 30 days</h3></div>
+              <div id="chartEventsTrend" class="chart"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>Event verdicts</h3></div>
+              <div id="chartVerdicts" class="chart chart-center"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>Device posture</h3></div>
+              <div id="chartPosture" class="chart chart-center"></div>
+            </div>
+            <div class="card span-2">
+              <div class="card-head"><h3>Top applications by activity</h3></div>
+              <div id="chartTopSaas" class="chart"></div>
+            </div>
+            <div class="card span-2">
+              <div class="card-head">
+                <h3>Recent blocked &amp; warned events</h3>
+                <span id="overviewCredNote" class="card-note"></span>
+              </div>
+              <ul id="overviewFeed" class="feed"></ul>
+            </div>
+          </div>
+        </section>
+
+        <!-- Devices -->
+        <section id="panel-devices" class="panel">
+          <div class="card">
+            <div class="card-head"><h3>🖥️ Device inventory</h3><span class="card-note">GET /api/v1/devices</span></div>
+            <div id="tableDevices"></div>
+          </div>
+        </section>
+
+        <!-- Users -->
+        <section id="panel-users" class="panel">
+          <div class="card">
+            <div class="card-head"><h3>👤 Browser users</h3><span class="card-note">GET /api/v1/users</span></div>
+            <div id="tableUsers"></div>
+          </div>
+        </section>
+
+        <!-- Credentials -->
+        <section id="panel-credentials" class="panel">
+          <div class="card">
+            <div class="card-head"><h3>🔑 Compromised credentials</h3><span class="card-note">GET /api/v1/compromised-credentials</span></div>
+            <div id="tableCreds"></div>
+          </div>
+        </section>
+
+        <!-- Events -->
+        <section id="panel-events" class="panel">
+          <div class="card">
+            <div class="card-head"><h3>🛡️ Audit / timeline events</h3><span class="card-note">GET /api/v1/audit · NDJSON SIEM stream</span></div>
+            <div id="tableEvents"></div>
+          </div>
+        </section>
+
+        <!-- Admin -->
+        <section id="panel-admin" class="panel">
+          <div class="card">
+            <div class="card-head"><h3>⚙️ Admin actions</h3><span class="card-note">GET /api/v1/admin-actions</span></div>
+            <div id="tableAdmin"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Settings overlay -->
+  <div id="settingsOverlay" class="overlay">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Data source settings</h2>
+        <button id="settingsClose" class="icon-btn" aria-label="Close">✕</button>
+      </div>
+      <form id="settingsForm" class="modal-body">
+        <label>Mode
+          <select id="f_mode">
+            <option value="mock">Sample data (no network)</option>
+            <option value="live">Live Island API</option>
+          </select>
+        </label>
+        <label>API base URL
+          <input id="f_baseUrl" type="text" placeholder="https://your-tenant.island.io or http://localhost:8787" />
+          <small>Point at your Management Console host, or the bundled proxy.</small>
+        </label>
+        <div class="row">
+          <label>API version <input id="f_version" type="text" value="v1" /></label>
+          <label>Refresh (sec) <input id="f_refresh" type="number" min="0" value="60" /></label>
+        </div>
+        <div class="row">
+          <label>Auth scheme
+            <select id="f_scheme">
+              <option value="header">Custom header</option>
+              <option value="bearer">Bearer token</option>
+            </select>
+          </label>
+          <label>Header name <input id="f_headerName" type="text" value="x-api-key" /></label>
+        </div>
+        <label>API key
+          <input id="f_apiKey" type="password" placeholder="Leave blank when using the proxy" autocomplete="off" />
+          <small>⚠️ A key entered here lives only in this browser's localStorage. For shared/static hosting, use the proxy so the key stays server-side.</small>
+        </label>
+        <div class="modal-foot">
+          <button type="submit" class="btn">Save &amp; reload</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Scripts (plain, no build step) -->
+  <script src="assets/js/config.js"></script>
+  <script src="assets/js/api-client.js"></script>
+  <script src="assets/js/mock-data.js"></script>
+  <script src="assets/js/data-service.js"></script>
+  <script src="assets/js/charts.js"></script>
+  <script src="assets/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+# Dependencies (none required, but just in case)
+node_modules/
+
+# Local env / secrets — never commit your Island API key
+.env
+.env.*
+*.local
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
