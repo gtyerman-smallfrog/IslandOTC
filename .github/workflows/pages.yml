@@ -1,8 +1,11 @@
 name: Deploy dashboard to GitHub Pages
 
 # Publishes the static Island IO dashboard (repo root) to GitHub Pages.
-# `configure-pages` with enablement:true turns Pages on automatically the first
-# time this runs, so no manual repo setting is required.
+#
+# ONE-TIME SETUP (repo admin, ~20s): Settings -> Pages -> Build and deployment
+# -> Source: "GitHub Actions". GitHub won't let the Actions token enable Pages
+# itself, so this toggle must be done once by hand. After that every push here
+# deploys automatically.
 
 on:
   push:
@@ -34,8 +37,6 @@ jobs:
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v3
