@@ -1,0 +1,48 @@
+name: Deploy dashboard to GitHub Pages
+
+# Publishes the static Island IO dashboard (repo root) to GitHub Pages.
+# `configure-pages` with enablement:true turns Pages on automatically the first
+# time this runs, so no manual repo setting is required.
+
+on:
+  push:
+    branches:
+      - main
+      - claude/island-io-gui-dashboard-PG6S0
+  workflow_dispatch:
+
+# Allow the workflow to publish to Pages via OIDC.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One concurrent deploy; let an in-progress run finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # Static site lives at the repository root (index.html + assets/).
+          path: .
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
