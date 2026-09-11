@@ -1,0 +1,971 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Island Rail — 3D Train Set</title>
+<style>
+  :root { --panel: rgba(18, 24, 33, 0.86); --line: rgba(255,255,255,0.12); --accent: #f4c542; --ok: #5ad17a; --bad: #ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1218; color: #e8edf3; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #c { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+  .hud { position: absolute; z-index: 5; pointer-events: none; }
+  .hud > * { pointer-events: auto; }
+  #top { top: 12px; left: 12px; right: 12px; display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; backdrop-filter: blur(6px); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+  #stats { display: flex; gap: 18px; align-items: center; font-weight: 600; }
+  #stats .v { color: var(--accent); font-variant-numeric: tabular-nums; }
+  #objective { font-size: 12.5px; color: #c6d0dc; }
+  #objective b { color: #fff; }
+  #objective .done { color: var(--ok); }
+  #tools { top: 70px; left: 12px; display: flex; flex-direction: column; gap: 6px; width: 190px; }
+  #tools button, #panel button, #help button { font: inherit; }
+  .tb { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: #e8edf3; cursor: pointer; text-align: left; }
+  .tb:hover { background: rgba(255,255,255,0.1); }
+  .tb.active { background: rgba(244,197,66,0.18); border-color: var(--accent); color: #fff; }
+  .tb kbd { margin-left: auto; font: 11px ui-monospace, monospace; background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px; }
+  .tb .ic { width: 18px; text-align: center; }
+  #status { font-size: 12px; color: #b9c4d0; min-height: 18px; margin-top: 4px; }
+  .row { display: flex; gap: 6px; }
+  .row .tb { padding: 6px 8px; font-size: 12.5px; justify-content: center; }
+  label.chk { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+  #panel { top: 70px; right: 12px; width: 250px; display: flex; flex-direction: column; gap: 8px; }
+  #panel h3 { margin: 0 0 6px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: #9fb0c2; }
+  .train-btn { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: #e8edf3; cursor: pointer; text-align: left; margin-bottom: 4px; }
+  .train-btn.sel { border-color: var(--accent); background: rgba(244,197,66,0.14); }
+  .train-btn .dot { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .train-btn .st { margin-left: auto; font-size: 11px; color: #9fb0c2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+  #sel { display: none; }
+  #sel .name { font-weight: 700; font-size: 15px; }
+  #sel .stat { font-size: 12.5px; color: #c6d0dc; margin: 4px 0 8px; min-height: 34px; }
+  .dest { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+  .dest button, .act button { padding: 7px 8px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,0.06); color: #fff; cursor: pointer; font-size: 12.5px; }
+  .dest button:hover, .act button:hover { background: rgba(255,255,255,0.14); }
+  .dest button:disabled { opacity: .4; cursor: default; }
+  .act { display: flex; gap: 6px; }
+  .act button.hold { border-color: var(--bad); }
+  .act button.hold.on { background: rgba(255,107,107,0.25); }
+  #toast { position: absolute; top: 64px; left: 50%; transform: translateX(-50%); z-index: 6; pointer-events: none; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+  .toast { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font-weight: 600; box-shadow: 0 6px 20px rgba(0,0,0,.35); animation: pop .18s ease-out; max-width: 80vw; text-align: center; }
+  .toast.good { border-color: var(--ok); color: #d8ffe4; }
+  .toast.bad { border-color: var(--bad); color: #ffd9d9; }
+  @keyframes pop { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
+  #hint { bottom: 12px; left: 50%; transform: translateX(-50%); font-size: 12px; color: #b9c4d0; text-align: center; white-space: nowrap; }
+  #help { position: absolute; inset: 0; z-index: 10; background: rgba(6, 10, 14, 0.72); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  #help .box { max-width: 640px; width: 100%; max-height: 92vh; overflow: auto; background: #151c25; border: 1px solid var(--line); border-radius: 14px; padding: 22px 26px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+  #help h1 { margin: 0 0 4px; font-size: 24px; }
+  #help h1 span { color: var(--accent); }
+  #help .sub { color: #9fb0c2; margin-bottom: 14px; }
+  #help h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .05em; color: #9fb0c2; margin: 14px 0 6px; }
+  #help ul { margin: 0; padding-left: 18px; }
+  #help li { margin: 3px 0; }
+  #help kbd { font: 11px ui-monospace, monospace; background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px; }
+  #help .start { margin-top: 16px; width: 100%; padding: 12px; border-radius: 10px; border: none; background: var(--accent); color: #1a1a1a; font-weight: 700; font-size: 15px; cursor: pointer; }
+  @media (max-width: 720px) {
+    #tools { width: 150px; }
+    #tools .tb kbd { display: none; }
+    #panel { width: 200px; }
+    #hint { display: none; }
+    #objective { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="top" class="hud">
+  <div class="card" id="stats">
+    <span>💰 <span class="v" id="money">$5,000</span></span>
+    <span>📦 Deliveries <span class="v" id="deliv">0</span></span>
+    <span id="objective">Serve <b>Harbour</b>, <b>Quarry</b> and <b>Hilltown</b> from Central Station.</span>
+  </div>
+</div>
+
+<div id="tools" class="hud">
+  <div class="card" style="display:flex;flex-direction:column;gap:6px">
+    <button class="tb active" data-tool="select"><span class="ic">🖱️</span>Select / Switch<kbd>1</kbd></button>
+    <button class="tb" data-tool="track"><span class="ic">🛤️</span>Lay Track<kbd>2</kbd></button>
+    <button class="tb" data-tool="signal"><span class="ic">🚦</span>Signal<kbd>3</kbd></button>
+    <button class="tb" data-tool="erase"><span class="ic">🧹</span>Erase<kbd>4</kbd></button>
+    <label class="chk"><input type="checkbox" id="autoRoute" checked> Auto-set switches</label>
+    <div id="status">Drag to lay track.</div>
+  </div>
+  <div class="card row">
+    <button class="tb" id="btnSave" title="Save layout">💾 Save</button>
+    <button class="tb" id="btnLoad" title="Load layout">📂 Load</button>
+    <button class="tb" id="btnHelp" title="Help">❔</button>
+  </div>
+</div>
+
+<div id="panel" class="hud">
+  <div class="card">
+    <h3>Trains in service</h3>
+    <div id="trainList"></div>
+  </div>
+  <div class="card" id="sel">
+    <div class="name" id="selName">—</div>
+    <div class="stat" id="selStat"></div>
+    <h3>Send to</h3>
+    <div class="dest" id="destBtns"></div>
+    <div class="act">
+      <button id="btnHold" class="hold">⏸ Hold</button>
+      <button id="btnReverse">🔁 Reverse</button>
+      <button id="btnFollow">🎥 Follow</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="hint" class="hud">Left-drag: orbit (or lay track) · Right-drag: pan · Wheel: zoom · WASD: move · Click a switch to throw it · Click a signal to change it</div>
+
+<div id="help">
+  <div class="box">
+    <h1>🚂 Island <span>Rail</span></h1>
+    <div class="sub">A 3D train set. Build the railway, control the traffic, deliver the goods.</div>
+    <h2>Your job</h2>
+    <ul>
+      <li>Three trains are waiting in the <b>holding yard</b> next to <b>Central Station</b>.</li>
+      <li>Lay track from the station to the <b>Harbour</b>, the <b>Quarry</b> and <b>Hilltown</b>. Every delivery between places pays out.</li>
+      <li>Track that crosses a <b>road</b> becomes a level crossing with boom gates. Track through a <b>hill</b> becomes a tunnel (they cost more!).</li>
+      <li>Trains obey the <b>track controls</b>: they stop at red signals, follow the switches as they are set, wait for trains ahead and slow for curves. Two trains on the same tile is a crash.</li>
+    </ul>
+    <h2>Controls</h2>
+    <ul>
+      <li><kbd>2</kbd> <b>Lay Track</b>: drag across the ground. Drag off an existing line to create a <b>switch</b>; cross a line at right angles for a diamond crossing. Click a piece to rotate it.</li>
+      <li><kbd>3</kbd> <b>Signal</b>: click near the end of a track piece to place a signal (starts red). Click a signal any time to toggle red / green.</li>
+      <li><kbd>1</kbd> <b>Select</b>: click a switch to throw it, click a train to open its control panel and send it somewhere.</li>
+      <li><kbd>4</kbd> <b>Erase</b>: remove track or signals (half refund).</li>
+      <li>Camera: left-drag orbit, right-drag or <kbd>Shift</kbd>+drag pan, wheel zoom, <kbd>W A S D</kbd> move, <kbd>Q</kbd>/<kbd>E</kbd> rotate.</li>
+    </ul>
+    <button class="start" id="btnStart">Start building</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+'use strict';
+if (typeof THREE === 'undefined') { document.getElementById('help').innerHTML = '<div class="box"><h1>Could not load three.js</h1><div class="sub">Island Rail needs the three.js library from cdnjs.cloudflare.com. Check your connection and reload.</div></div>'; throw new Error('three.js failed to load'); }
+// =====================================================================
+//  Island Rail — a 3D train-set game (three.js r128, no build step)
+// =====================================================================
+
+// ---------- constants & helpers ----------
+const T = 4;                 // tile size in world units
+const MAPW = 28, MAPH = 28;  // tiles
+const DX = [0, 1, 0, -1], DZ = [-1, 0, 1, 0];       // N E S W
+const DN = ['N', 'E', 'S', 'W'];
+const OPP = d => (d + 2) & 3;
+const EM = [[0, -2], [2, 0], [0, 2], [-2, 0]];      // edge midpoints (tile-local)
+const key = (x, z) => x + ',' + z;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const lerp = (a, b, t) => a + (b - a) * t;
+function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const rnd = mulberry32(20240911);
+const fmtMoney = n => (n < 0 ? '-$' : '$') + Math.abs(Math.round(n)).toLocaleString();
+
+const COST = { straight: 100, curve: 120, switch: 80, diamond: 150, tunnel: 250, crossing: 300, signal: 60 };
+const MAXV = 7.5, CURVEV = 4.2, SWITCHV = 5.5, ACC = 2.6, DECEL = 3.6;
+const CAR_SPACING = 3.7, HILL_H = 7;
+
+const game = { money: 5000, deliveries: 0, served: new Set(), autoRoute: true, tool: 'select', selected: null, follow: false, time: 0 };
+
+// ---------- three.js setup ----------
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xbfe0f7);
+scene.fog = new THREE.Fog(0xbfe0f7, 140, 260);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 600);
+const cam = { target: new THREE.Vector3(30, 0, 62), yaw: 0.55, pitch: 0.85, dist: 58 };
+function updateCamera() {
+  const cp = Math.cos(cam.pitch);
+  camera.position.set(cam.target.x + cam.dist * cp * Math.sin(cam.yaw), cam.target.y + cam.dist * Math.sin(cam.pitch), cam.target.z + cam.dist * cp * Math.cos(cam.yaw));
+  camera.lookAt(cam.target);
+}
+function resize() { renderer.setSize(innerWidth, innerHeight, false); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+
+scene.add(new THREE.HemisphereLight(0xdfefff, 0x5a7a45, 0.5));
+const sun = new THREE.DirectionalLight(0xfff2dc, 0.85);
+sun.position.set(70, 110, 40); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -80, right: 80, top: 80, bottom: -80, near: 10, far: 300 });
+sun.shadow.bias = -0.0008;
+sun.target.position.set(56, 0, 56); scene.add(sun, sun.target);
+
+const MAT = {
+  ballast: new THREE.MeshLambertMaterial({ color: 0x9a917f, side: THREE.DoubleSide }),
+  concrete: new THREE.MeshLambertMaterial({ color: 0x9d9d97, side: THREE.DoubleSide }),
+  rail: new THREE.MeshStandardMaterial({ color: 0x9a9a9a, metalness: 0.7, roughness: 0.35 }),
+  sleeper: new THREE.MeshLambertMaterial({ color: 0x5b4632 }),
+  asphalt: new THREE.MeshLambertMaterial({ color: 0x3b3d43 }),
+  dash: new THREE.MeshLambertMaterial({ color: 0xe8e2c8 }),
+  water: new THREE.MeshLambertMaterial({ color: 0x3f86c7, transparent: true, opacity: 0.85 }),
+  stone: new THREE.MeshLambertMaterial({ color: 0x8c8a80 }),
+  tunnelInner: new THREE.MeshBasicMaterial({ color: 0x0b0b0e, side: THREE.BackSide }),
+  trunk: new THREE.MeshLambertMaterial({ color: 0x6b4a2b }),
+  leaf1: new THREE.MeshLambertMaterial({ color: 0x2f7a3a }),
+  leaf2: new THREE.MeshLambertMaterial({ color: 0x3f9448 }),
+  dark: new THREE.MeshLambertMaterial({ color: 0x22252a }),
+  white: new THREE.MeshLambertMaterial({ color: 0xf2f2f2 }),
+  red: new THREE.MeshLambertMaterial({ color: 0xd8302a }),
+  yellow: new THREE.MeshBasicMaterial({ color: 0xffd43a, transparent: true, opacity: 0.9, side: THREE.DoubleSide }),
+  ghostOk: new THREE.MeshBasicMaterial({ color: 0x5ad17a, transparent: true, opacity: 0.45, depthWrite: false }),
+  ghostBad: new THREE.MeshBasicMaterial({ color: 0xff5252, transparent: true, opacity: 0.45, depthWrite: false }),
+  ghostHover: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25, depthWrite: false }),
+};
+
+// ---------- path geometry (tile-local curves) ----------
+class ArcCurve extends THREE.Curve {
+  constructor(cx, cz, r, a0, da) { super(); this.cx = cx; this.cz = cz; this.r = r; this.a0 = a0; this.da = da; }
+  getPoint(t, o = new THREE.Vector3()) { const a = this.a0 + this.da * t; return o.set(this.cx + this.r * Math.cos(a), 0, this.cz + this.r * Math.sin(a)); }
+}
+class OffsetCurve extends THREE.Curve {
+  constructor(base, off, y) { super(); this.base = base; this.off = off; this.y = y; }
+  getPoint(t, o = new THREE.Vector3()) { const p = this.base.getPoint(t), g = this.base.getTangent(t); return o.set(p.x - g.z * this.off, this.y, p.z + g.x * this.off); }
+}
+const pathCache = {};
+function getPath(a, b) {
+  if (a > b) [a, b] = [b, a];
+  const k = a * 4 + b; if (pathCache[k]) return pathCache[k];
+  const pa = EM[a], pb = EM[b]; let curve, len, isCurve;
+  if (OPP(a) === b) { curve = new THREE.LineCurve3(new THREE.Vector3(pa[0], 0, pa[1]), new THREE.Vector3(pb[0], 0, pb[1])); len = T; isCurve = false; }
+  else {
+    const cx = pa[0] + pb[0], cz = pa[1] + pb[1];
+    const a0 = Math.atan2(pa[1] - cz, pa[0] - cx); let da = Math.atan2(pb[1] - cz, pb[0] - cx) - a0;
+    while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+    curve = new ArcCurve(cx, cz, 2, a0, da); len = Math.PI; isCurve = true;
+  }
+  return (pathCache[k] = { a, b, curve, len, isCurve, key: k });
+}
+const pathOther = (p, e) => (p.a === e ? p.b : p.a);
+const pathHas = (p, e) => p.a === e || p.b === e;
+
+// ---------- map ----------
+const tiles = [];
+for (let z = 0; z < MAPH; z++) { tiles.push([]); for (let x = 0; x < MAPW; x++) tiles[z].push({ x, z, terrain: 'grass', roadAxis: -1, paths: [], sw: null, locked: false, signals: {}, place: null, group: null, tree: null, crossing: null, swRibbons: null }); }
+const tileAt = (x, z) => (x < 0 || z < 0 || x >= MAPW || z >= MAPH) ? null : tiles[z][x];
+const tileCenter = t => new THREE.Vector3(t.x * T + 2, 0, t.z * T + 2);
+function forRect(r, fn) { for (let z = r[1]; z <= r[3]; z++) for (let x = r[0]; x <= r[2]; x++) fn(tiles[z][x]); }
+
+const HILLS = [[0, 7, 13, 8], [9, 5, 12, 6], [11, 16, 14, 19], [6, 23, 10, 26], [20, 1, 25, 3]];
+const WATER = [[21, 12, 25, 15]];
+HILLS.forEach(r => forRect(r, t => t.terrain = 'hill'));
+WATER.forEach(r => forRect(r, t => t.terrain = 'water'));
+const ROAD_X = 16, ROAD_Z = 21;
+for (let z = 0; z < MAPH; z++) { const t = tiles[z][ROAD_X]; t.terrain = 'road'; t.roadAxis = 0; }
+for (let x = 0; x < MAPW; x++) { const t = tiles[ROAD_Z][x]; t.terrain = 'road'; t.roadAxis = (x === ROAD_X) ? 2 : 1; }
+
+const PLACES = [
+  { id: 'central', name: 'Central Station', stop: [6, 14], icon: '🏛️' },
+  { id: 'harbour', name: 'Harbour', stop: [22, 16], icon: '⚓' },
+  { id: 'quarry', name: 'Quarry', stop: [20, 25], icon: '⛏️' },
+  { id: 'hilltown', name: 'Hilltown', stop: [4, 3], icon: '🏘️' },
+  { id: 'yard1', name: 'Yard Road 1', stop: [7, 17], yard: true, icon: '🏗️' },
+  { id: 'yard2', name: 'Yard Road 2', stop: [7, 18], yard: true, icon: '🏗️' },
+  { id: 'yard3', name: 'Yard Road 3', stop: [7, 19], yard: true, icon: '🏗️' },
+];
+const placeById = id => PLACES.find(p => p.id === id);
+PLACES.forEach(p => { p.tile = tileAt(p.stop[0], p.stop[1]); p.tile.place = p; });
+
+// pre-laid track
+function lay(x, z, a, b, lock) { const t = tileAt(x, z); const p = getPath(a, b); if (!t.paths.includes(p)) t.paths.push(p); recomputeSwitch(t); if (lock) t.locked = true; }
+function recomputeSwitch(t) {
+  if (t.paths.length === 2) { const [p, q] = t.paths; const shared = [0, 1, 2, 3].find(e => pathHas(p, e) && pathHas(q, e)); if (shared !== undefined) { t.sw = { trunk: shared, state: t.sw ? t.sw.state : 0 }; return; } }
+  t.sw = null;
+}
+const N = 0, E = 1, S = 2, Wn = 3;
+lay(3, 14, E, S, true);
+for (let x = 4; x <= 9; x++) lay(x, 14, E, Wn, x >= 5 && x <= 8);
+lay(3, 15, N, S, true); lay(3, 16, N, S, true);
+lay(3, 17, N, S, true); lay(3, 17, N, E, true);
+lay(3, 18, N, S, true); lay(3, 18, N, E, true);
+lay(3, 19, N, E, true);
+for (let z = 17; z <= 19; z++) for (let x = 4; x <= 7; x++) lay(x, z, E, Wn, true);
+for (let x = 21; x <= 23; x++) lay(x, 16, E, Wn, x === 22);
+for (let x = 19; x <= 21; x++) lay(x, 25, E, Wn, x === 20);
+for (let x = 3; x <= 5; x++) lay(x, 3, E, Wn, x === 4);
+tileAt(3, 15).signals[N] = { state: 'red' };  // yard exit signal
+
+// building footprints
+const BLOCKS = [[4, 13, 9, 13], [5, 12, 7, 12], [1, 18, 1, 18], [21, 17, 23, 17], [24, 16, 24, 17], [18, 26, 22, 26], [22, 25, 22, 25], [2, 2, 2, 2], [4, 2, 4, 2], [6, 2, 6, 2], [3, 1, 3, 1], [5, 1, 5, 1]];
+BLOCKS.forEach(r => forRect(r, t => t.terrain = 'block'));
+
+// ---------- terrain mesh ----------
+const ground = (() => {
+  const g = new THREE.PlaneGeometry(MAPW * T, MAPH * T, MAPW * 3, MAPH * 3);
+  g.rotateX(-Math.PI / 2); g.translate(MAPW * T / 2, 0, MAPH * T / 2);
+  const pos = g.attributes.position, n = pos.count;
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  m.receiveShadow = true; m.castShadow = true;
+  const hillTiles = [], openTiles = [];
+  for (const row of tiles) for (const t of row) (t.terrain === 'hill' ? hillTiles : openTiles).push(t);
+  const rectDist = (px, pz, t) => { const x0 = t.x * T, z0 = t.z * T; const dx = Math.max(x0 - px, 0, px - x0 - T), dz = Math.max(z0 - pz, 0, pz - z0 - T); return Math.hypot(dx, dz) / T; };
+  m.userData.vd = new Float32Array(n); m.userData.vt = []; m.userData.vr = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const vx = pos.getX(i), vz = pos.getZ(i);
+    let dh = Infinity; for (const t of hillTiles) { const d = rectDist(vx, vz, t); if (d < dh) dh = d; if (dh === 0) break; }
+    let d; if (dh === 0) { let dn = Infinity; for (const t of openTiles) { const q = rectDist(vx, vz, t); if (q < dn) dn = q; } d = dn; } else d = -dh;
+    m.userData.vd[i] = d;
+    const xs = new Set([Math.floor((vx - 0.01) / T), Math.floor((vx + 0.01) / T)]), zs = new Set([Math.floor((vz - 0.01) / T), Math.floor((vz + 0.01) / T)]);
+    const tt = []; for (const x of xs) for (const z of zs) { const t = tileAt(x, z); if (t) tt.push(t); }
+    m.userData.vt.push(tt); m.userData.vr[i] = rnd();
+  }
+  scene.add(m); return m;
+})();
+const cGrass = new THREE.Color(0x62a742), cGrass2 = new THREE.Color(0x7fbf52), cHill = new THREE.Color(0x4e8a3c), cDirt = new THREE.Color(0x9a8a62), cRock = new THREE.Color(0x8d897d), cSand = new THREE.Color(0xc4b384);
+function updateTerrain() {
+  const g = ground.geometry, pos = g.attributes.position, col = g.attributes.color, { vd, vt, vr } = ground.userData; const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const d = vd[i]; let h = HILL_H * smoothstep(-0.6, 0.55, d);
+    let flat = false, allWater = true;
+    for (const t of vt[i]) { if (t.terrain !== 'water') allWater = false; if (t.terrain !== 'hill' && (t.paths.length || t.terrain === 'road' || t.terrain === 'water' || t.terrain === 'block')) flat = true; }
+    if (flat) h = 0;
+    const vx = pos.getX(i), vz = pos.getZ(i);
+    if (h > 0.3) h += 0.45 * Math.sin(vx * 0.9 + vz * 0.4) * Math.cos(vz * 0.7 - vx * 0.3) * clamp(h / 3, 0, 1);
+    if (allWater) h = -0.7;
+    pos.setY(i, h);
+    c.copy(cGrass).lerp(cGrass2, vr[i]);
+    if (h > 0) c.lerp(cHill, clamp(h / 2.5, 0, 1)); if (h > 2.5) c.lerp(cDirt, clamp((h - 2.5) / 3.5, 0, 0.85)); if (h > 5.5) c.lerp(cRock, clamp((h - 5.5) / 2.5, 0, 0.7));
+    if (allWater) c.copy(cSand);
+    col.setXYZ(i, c.r, c.g, c.b);
+  }
+  pos.needsUpdate = true; col.needsUpdate = true; g.computeVertexNormals();
+}
+
+// ---------- static scenery ----------
+const staticGroup = new THREE.Group(); scene.add(staticGroup);
+function box(w, h, d, mat, x, y, z, parent = staticGroup) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true; parent.add(m); return m; }
+function makeLabel(text, color = '#ffffff') {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 128; const ctx = cv.getContext('2d');
+  ctx.font = 'bold 60px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineWidth = 10; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.strokeText(text, 256, 64); ctx.fillStyle = color; ctx.fillText(text, 256, 64);
+  const tex = new THREE.CanvasTexture(cv);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false })); s.scale.set(14, 3.5, 1); return s;
+}
+function label(text, x, y, z) { const s = makeLabel(text); s.position.set(x, y, z); staticGroup.add(s); }
+// roads
+for (const row of tiles) for (const t of row) if (t.terrain === 'road') {
+  const c = tileCenter(t);
+  const a = new THREE.Mesh(new THREE.PlaneGeometry(T, T), MAT.asphalt); a.rotation.x = -Math.PI / 2; a.position.set(c.x, 0.03, c.z); a.receiveShadow = true; staticGroup.add(a);
+  if (t.roadAxis !== 2) for (const o of [-1.2, 1.2]) { const d = new THREE.Mesh(new THREE.PlaneGeometry(t.roadAxis === 0 ? 0.14 : 1.2, t.roadAxis === 0 ? 1.2 : 0.14), MAT.dash); d.rotation.x = -Math.PI / 2; d.position.set(c.x + (t.roadAxis === 1 ? o : 0), 0.04, c.z + (t.roadAxis === 0 ? o : 0)); staticGroup.add(d); }
+}
+// water
+{ const r = WATER[0]; const w = new THREE.Mesh(new THREE.PlaneGeometry((r[2] - r[0] + 1) * T, (r[3] - r[1] + 1) * T), MAT.water); w.rotation.x = -Math.PI / 2; w.position.set((r[0] + r[2] + 1) * T / 2, -0.05, (r[1] + r[3] + 1) * T / 2); staticGroup.add(w); }
+// station
+{
+  const cream = new THREE.MeshLambertMaterial({ color: 0xe6d8b8 }), roof = new THREE.MeshLambertMaterial({ color: 0x8a3b2e }), plat = new THREE.MeshLambertMaterial({ color: 0xb8b2a3 });
+  box(24, 0.7, 3.2, plat, 7 * T, 0.35, 13 * T + 2.4);
+  box(11, 3.2, 3.6, cream, 6.5 * T, 1.6, 12 * T + 2);
+  const r = box(12, 1.2, 4.4, roof, 6.5 * T, 3.8, 12 * T + 2); r.scale.y = 1;
+  for (let x = 4; x <= 9; x++) { box(0.2, 3, 0.2, MAT.dark, x * T + 2, 1.5, 13 * T + 2.9); }
+  box(23.5, 0.15, 3.4, new THREE.MeshLambertMaterial({ color: 0x4f6d8f }), 7 * T, 3.1, 13 * T + 2.4);
+  label('Central Station', 7 * T, 8.5, 12 * T);
+}
+// yard office
+box(3, 2.2, 3, new THREE.MeshLambertMaterial({ color: 0x6f7c8a }), 1 * T + 2, 1.1, 18 * T + 2); label('Holding Yard', 6 * T, 6, 20 * T + 2);
+// harbour
+{
+  const wh = new THREE.MeshLambertMaterial({ color: 0x9b4d3f }), steel = new THREE.MeshLambertMaterial({ color: 0xd8b13a });
+  box(11, 3.5, 3.4, wh, 22 * T + 2, 1.75, 17 * T + 2); box(11.4, 0.4, 3.8, MAT.dark, 22 * T + 2, 3.7, 17 * T + 2);
+  box(0.5, 9, 0.5, steel, 24 * T + 2, 4.5, 16 * T + 2); box(7, 0.4, 0.4, steel, 24 * T + 0.5, 9, 16 * T + 2); box(0.5, 9, 0.5, steel, 24 * T + 2, 4.5, 17 * T + 2);
+  box(0.08, 3.5, 0.08, MAT.dark, 22 * T + 2, 7.4, 16 * T + 2); box(0.9, 0.6, 0.6, MAT.dark, 22 * T + 2, 5.5, 16 * T + 2);
+  const boat = new THREE.Group(); boat.position.set(23 * T + 2, 0, 14 * T); box(6, 1.2, 2.4, new THREE.MeshLambertMaterial({ color: 0x2c4f7c }), 0, 0.5, 0, boat); box(2.2, 1.4, 1.8, MAT.white, -0.8, 1.7, 0, boat); box(0.4, 1.6, 0.4, MAT.red, 0.8, 2.2, 0, boat); staticGroup.add(boat);
+  label('Harbour', 22 * T + 2, 7.5, 16 * T + 2);
+}
+// quarry
+{
+  const grey = new THREE.MeshLambertMaterial({ color: 0x8e8a7e });
+  for (let i = 0; i < 6; i++) { const m = new THREE.Mesh(new THREE.ConeGeometry(2 + rnd() * 1.5, 3 + rnd() * 3, 6), grey); m.position.set(18 * T + 3 + i * 3.4, 1.4, 26 * T + 2 + (rnd() - .5) * 2); m.castShadow = true; staticGroup.add(m); }
+  box(3, 5, 3.2, new THREE.MeshLambertMaterial({ color: 0x5d6b78 }), 22 * T + 2, 3.2, 25 * T + 2); box(1.2, 1.5, 1.2, MAT.dark, 22 * T + 2, 0.75, 25 * T + 2);
+  label('Quarry', 20 * T + 2, 7.5, 25 * T + 2);
+}
+// hilltown houses
+{
+  const cols = [0xf2e6c9, 0xd9c9a8, 0xe9d3b3, 0xcfe0e8, 0xf0dccc], roofs = [0x8a3b2e, 0x555a63, 0x7a5a3a];
+  BLOCKS.slice(7).forEach((r, i) => { const t = tileAt(r[0], r[1]); const c = tileCenter(t); box(2.6, 2.2, 2.6, new THREE.MeshLambertMaterial({ color: cols[i % cols.length] }), c.x, 1.1, c.z); const rf = new THREE.Mesh(new THREE.ConeGeometry(2.2, 1.6, 4), new THREE.MeshLambertMaterial({ color: roofs[i % roofs.length] })); rf.position.set(c.x, 3.0, c.z); rf.rotation.y = Math.PI / 4; rf.castShadow = true; staticGroup.add(rf); });
+  label('Hilltown', 4 * T + 2, 7.5, 3 * T + 2);
+}
+// trees
+function makeTree(x, z) {
+  const g = new THREE.Group(); const s = 0.7 + rnd() * 0.7;
+  const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.15 * s, 0.22 * s, 1.2 * s, 6), MAT.trunk); tr.position.y = 0.6 * s; tr.castShadow = true; g.add(tr);
+  const c1 = new THREE.Mesh(new THREE.ConeGeometry(1.1 * s, 2.2 * s, 7), rnd() > 0.5 ? MAT.leaf1 : MAT.leaf2); c1.position.y = 2.0 * s; c1.castShadow = true; g.add(c1);
+  const c2 = new THREE.Mesh(new THREE.ConeGeometry(0.8 * s, 1.6 * s, 7), MAT.leaf2); c2.position.y = 3.0 * s; c2.castShadow = true; g.add(c2);
+  g.position.set(x, 0, z); return g;
+}
+for (const row of tiles) for (const t of row) {
+  if (t.terrain !== 'grass' || t.paths.length || t.place) continue;
+  if ([[0, 12, 10, 20], [18, 15, 26, 18], [17, 24, 23, 27], [1, 0, 7, 4]].some(r => t.x >= r[0] && t.x <= r[2] && t.z >= r[1] && t.z <= r[3])) continue;
+  if (rnd() < 0.16) { const g = new THREE.Group(); const n = 1 + (rnd() < 0.4 ? 1 : 0); for (let i = 0; i < n; i++) g.add(makeTree(t.x * T + 0.8 + rnd() * 2.4, t.z * T + 0.8 + rnd() * 2.4)); t.tree = g; staticGroup.add(g); }
+}
+
+// ---------- track meshes ----------
+const trackGroup = new THREE.Group(); scene.add(trackGroup);
+const signalPickables = [];
+function ribbonGeometry(curve, halfW, y, segs) {
+  const pos = new Float32Array((segs + 1) * 6), idx = [];
+  for (let i = 0; i <= segs; i++) { const t = i / segs, p = curve.getPoint(t), g = curve.getTangent(t); const rx = -g.z * halfW, rz = g.x * halfW; pos.set([p.x - rx, y, p.z - rz, p.x + rx, y, p.z + rz], i * 6); if (i < segs) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setIndex(idx); g.computeVertexNormals(); return g;
+}
+function disposeGroup(g) { g.traverse(o => { if (o.geometry) o.geometry.dispose(); }); if (g.parent) g.parent.remove(g); }
+const sleeperGeo = new THREE.BoxGeometry(0.32, 0.14, 1.9);
+function buildSignal(tile, edge) {
+  const g = new THREE.Group(); const rx = -DZ[edge], rz = DX[edge];
+  g.position.set(EM[edge][0] * 0.72 + rx * 1.2, 0, EM[edge][1] * 0.72 + rz * 1.2);
+  g.rotation.y = Math.atan2(DZ[edge], -DX[edge]);
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2.6, 8), MAT.dark); post.position.y = 1.3; g.add(post);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.2, 0.55), MAT.dark); head.position.y = 2.95; g.add(head);
+  const mr = new THREE.MeshBasicMaterial({ color: 0xff2a2a }), mg = new THREE.MeshBasicMaterial({ color: 0x2aff5a });
+  const lr = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 10), mr); lr.position.set(0.2, 3.2, 0); g.add(lr);
+  const lg = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 10), mg); lg.position.set(0.2, 2.7, 0); g.add(lg);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.2, 10), MAT.concrete); base.position.y = 0.1; g.add(base);
+  const sig = tile.signals[edge]; sig.mr = mr; sig.mg = mg; sig.group = g;
+  g.traverse(o => { o.userData.sig = { tile, edge }; });
+  signalPickables.push(g); updateSignalVisual(sig); return g;
+}
+function updateSignalVisual(sig) { if (!sig.mr) return; const red = sig.state === 'red'; sig.mr.color.set(red ? 0xff2a2a : 0x3a0808); sig.mg.color.set(red ? 0x083a12 : 0x2aff5a); }
+function buildPortal(edge) {
+  const g = new THREE.Group();
+  const shape = new THREE.Shape(); shape.moveTo(-2.6, 0); shape.lineTo(2.6, 0); shape.lineTo(2.6, 5.2); shape.lineTo(-2.6, 5.2); shape.closePath();
+  const hole = new THREE.Path(); hole.moveTo(-1.55, 0); hole.lineTo(1.55, 0); hole.lineTo(1.55, 2.2); hole.absarc(0, 2.2, 1.55, 0, Math.PI, false); hole.lineTo(-1.55, 0); shape.holes.push(hole);
+  const wall = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.7, bevelEnabled: false }), MAT.stone); wall.castShadow = true; wall.receiveShadow = true; wall.position.z = -0.7; g.add(wall);
+  const inner = new THREE.Mesh(new THREE.BoxGeometry(3.2, 3.9, 6), MAT.tunnelInner); inner.position.set(0, 1.9, -3.4); g.add(inner);
+  g.position.set(EM[edge][0], 0, EM[edge][1]); g.rotation.y = Math.atan2(DX[edge], DZ[edge]);
+  return g;
+}
+function buildCrossing(tile, g) {
+  const cr = { gate: 0, pivots: [], lamps: [], center: tileCenter(tile) };
+  const arm = () => { const a = new THREE.Group(); for (let i = 0; i < 5; i++) { const seg = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.12), i % 2 ? MAT.white : MAT.red); seg.position.x = 0.35 + i * 0.5; seg.castShadow = true; a.add(seg); } return a; };
+  const specs = tile.roadAxis === 0 ? [[-1.9, -1.9, 0], [1.9, 1.9, Math.PI]] : [[-1.9, 1.9, Math.PI / 2], [1.9, -1.9, -Math.PI / 2]];
+  for (const [px, pz, ry] of specs) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 1.9, 8), MAT.white); post.position.set(px, 0.95, pz); g.add(post);
+    const pivot = new THREE.Group(); pivot.position.set(px, 1.0, pz); pivot.rotation.set(0, ry, Math.PI / 2); pivot.add(arm()); g.add(pivot); cr.pivots.push(pivot);
+    const lm = new THREE.MeshBasicMaterial({ color: 0x3a0808 }); const l1 = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), lm); l1.position.set(px, 1.75, pz); g.add(l1);
+    const lm2 = new THREE.MeshBasicMaterial({ color: 0x3a0808 }); const l2 = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 8), lm2); l2.position.set(px, 2.05, pz); g.add(l2);
+    cr.lamps.push(lm, lm2);
+  }
+  tile.crossing = cr;
+}
+function rebuildTile(tile) {
+  if (tile.group) disposeGroup(tile.group);
+  for (const e in tile.signals) { const s = tile.signals[e]; if (s.group) { const i = signalPickables.indexOf(s.group); if (i >= 0) signalPickables.splice(i, 1); s.group = null; } }
+  tile.crossing = null; tile.swRibbons = null;
+  if (!tile.paths.length) { tile.group = null; return; }
+  const g = new THREE.Group(); const c = tileCenter(tile); g.position.copy(c);
+  const isRoad = tile.terrain === 'road';
+  for (const p of tile.paths) {
+    const segs = p.isCurve ? 12 : 2;
+    if (!isRoad) g.add(new THREE.Mesh(ribbonGeometry(p.curve, 1.3, 0.05, segs), MAT.ballast));
+    else g.add(new THREE.Mesh(ribbonGeometry(p.curve, 1.25, 0.06, segs), MAT.concrete));
+    const n = p.isCurve ? 8 : 10; const inst = new THREE.InstancedMesh(sleeperGeo, MAT.sleeper, n); const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3(1, 1, 1);
+    for (let i = 0; i < n; i++) { const t = (i + 0.5) / n; const pt = p.curve.getPoint(t), tg = p.curve.getTangent(t); q.setFromAxisAngle(up, Math.atan2(-tg.z, tg.x)); m4.compose(new THREE.Vector3(pt.x, 0.12, pt.z), q, sc); inst.setMatrixAt(i, m4); }
+    inst.receiveShadow = true; if (!isRoad) g.add(inst);
+    for (const off of [-0.5, 0.5]) { const r = new THREE.Mesh(new THREE.TubeGeometry(new OffsetCurve(p.curve, off, 0.24), p.isCurve ? 14 : 2, 0.075, 5, false), MAT.rail); r.castShadow = true; g.add(r); }
+  }
+  if (tile.sw) {
+    tile.swRibbons = tile.paths.map(p => { const m = new THREE.Mesh(ribbonGeometry(p.curve, 0.14, 0.32, p.isCurve ? 12 : 2), MAT.yellow); g.add(m); return m; });
+    updateSwitchVisual(tile);
+    const tr = tile.sw.trunk; const rx = -DZ[tr], rz = DX[tr];
+    const stand = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.9, 0.35), MAT.white); stand.position.set(EM[tr][0] * 0.35 + rx * 1.4, 0.45, EM[tr][1] * 0.35 + rz * 1.4); stand.castShadow = true; g.add(stand);
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 8), MAT.yellow); lamp.position.set(stand.position.x, 1.05, stand.position.z); g.add(lamp);
+  }
+  if (isRoad) buildCrossing(tile, g);
+  if (tile.terrain === 'hill') {
+    const edges = new Set(); tile.paths.forEach(p => { edges.add(p.a); edges.add(p.b); });
+    for (const e of edges) { const nb = tileAt(tile.x + DX[e], tile.z + DZ[e]); if (!nb || nb.terrain !== 'hill') g.add(buildPortal(e)); }
+  }
+  for (const e in tile.signals) g.add(buildSignal(tile, +e));
+  trackGroup.add(g); tile.group = g;
+}
+function updateSwitchVisual(tile) { if (!tile.swRibbons) return; tile.swRibbons.forEach((m, i) => m.visible = (i === tile.sw.state)); }
+function setSwitch(tile, idx) { if (!tile.sw || tile.sw.state === idx) return; tile.sw.state = idx; updateSwitchVisual(tile); }
+
+// ---------- trains ----------
+const trainGroup = new THREE.Group(); scene.add(trainGroup);
+function buildLoco(color) {
+  const g = new THREE.Group(); const body = new THREE.MeshLambertMaterial({ color }), brass = new THREE.MeshLambertMaterial({ color: 0xd4af37 });
+  const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; g.add(m); return m; };
+  add(new THREE.BoxGeometry(3.1, 0.45, 1.5), MAT.dark, 0, 0.75, 0);
+  add(new THREE.CylinderGeometry(0.58, 0.58, 2.0, 14), body, 0.4, 1.45, 0).rotation.z = Math.PI / 2;
+  add(new THREE.BoxGeometry(1.15, 1.25, 1.55), body, -0.95, 1.6, 0);
+  add(new THREE.BoxGeometry(1.35, 0.14, 1.75), MAT.dark, -0.95, 2.28, 0);
+  add(new THREE.BoxGeometry(0.9, 0.35, 1.58), MAT.dark, -0.95, 1.75, 0);
+  add(new THREE.CylinderGeometry(0.15, 0.22, 0.65, 10), MAT.dark, 1.15, 2.3, 0);
+  add(new THREE.CylinderGeometry(0.22, 0.22, 0.3, 10), brass, 0.35, 2.15, 0);
+  add(new THREE.SphereGeometry(0.15, 8, 8), new THREE.MeshBasicMaterial({ color: 0xfff3b0 }), 1.6, 1.55, 0);
+  add(new THREE.BoxGeometry(0.3, 0.3, 1.6), MAT.red, 1.5, 0.6, 0);
+  for (const x of [-1.05, -0.15, 0.75]) for (const z of [-0.62, 0.62]) add(new THREE.CylinderGeometry(0.37, 0.37, 0.18, 12), MAT.dark, x, 0.37, z).rotation.x = Math.PI / 2;
+  return g;
+}
+function buildCar(color, kind, i) {
+  const g = new THREE.Group(); const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = true; g.add(m); return m; };
+  if (kind === 'freight') {
+    add(new THREE.BoxGeometry(3.2, 0.9, 1.5), new THREE.MeshLambertMaterial({ color: i % 2 ? 0x6b4f3a : color }), 0, 1.05, 0);
+    add(new THREE.BoxGeometry(2.7, 0.5, 1.1), new THREE.MeshLambertMaterial({ color: 0x8c8878 }), 0, 1.7, 0);
+  } else {
+    add(new THREE.BoxGeometry(3.2, 1.15, 1.5), new THREE.MeshLambertMaterial({ color }), 0, 1.2, 0);
+    add(new THREE.BoxGeometry(2.6, 0.42, 1.54), new THREE.MeshLambertMaterial({ color: 0x1f2a36 }), 0, 1.4, 0);
+    add(new THREE.BoxGeometry(3.3, 0.16, 1.62), new THREE.MeshLambertMaterial({ color: 0xd9d9d9 }), 0, 1.86, 0);
+  }
+  add(new THREE.BoxGeometry(3.1, 0.3, 1.4), MAT.dark, 0, 0.62, 0);
+  for (const x of [-1.05, 1.05]) for (const z of [-0.62, 0.62]) add(new THREE.CylinderGeometry(0.34, 0.34, 0.18, 12), MAT.dark, x, 0.34, z).rotation.x = Math.PI / 2;
+  return g;
+}
+const trains = [
+  { name: 'Red Rocket', color: 0xd0342c, kind: 'pass', home: 'yard1' },
+  { name: 'Blue Comet', color: 0x2c6fd0, kind: 'pass', home: 'yard2' },
+  { name: 'Green Goods', color: 0x2e8b57, kind: 'freight', home: 'yard3' },
+];
+const selMarker = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.1, 8), new THREE.MeshBasicMaterial({ color: 0xffd43a })); selMarker.rotation.x = Math.PI; selMarker.visible = false; scene.add(selMarker);
+for (const tr of trains) {
+  tr.cars = []; tr.v = 0; tr.target = null; tr.route = null; tr.mem = {}; tr.hold = false; tr.wrecked = false; tr.wreckTimer = 0; tr.unload = 0; tr.status = ''; tr.lastPlace = placeById(tr.home); tr.smokeT = 0;
+  for (let i = 0; i < 3; i++) { const mesh = i === 0 ? buildLoco(tr.color) : buildCar(tr.color, tr.kind, i); trainGroup.add(mesh); mesh.traverse(o => o.userData.train = tr); tr.cars.push({ mesh, tile: null, path: null, fwd: true, t: 0, pos: new THREE.Vector3(), lastKey: null }); }
+}
+
+const _a = new THREE.Vector3(), _b = new THREE.Vector3();
+function choosePath(tile, entry, train) {
+  const c = tile.paths.filter(p => pathHas(p, entry)); if (!c.length) return null; if (c.length === 1) return c[0];
+  if (train) { const m = train.mem[key(tile.x, tile.z)]; if (m !== undefined) return tile.paths[m]; }
+  return tile.paths[tile.sw ? tile.sw.state : 0];
+}
+// advance a car state by dist; returns true if blocked by a dead end
+function advance(st, dist, train, role) {
+  while (dist > 0) {
+    const rem = (1 - st.t) * st.path.len;
+    if (dist < rem) { st.t += dist / st.path.len; return false; }
+    dist -= rem;
+    const exit = st.fwd ? st.path.b : st.path.a; const nt = tileAt(st.tile.x + DX[exit], st.tile.z + DZ[exit]); const entry = OPP(exit);
+    const np = nt ? choosePath(nt, entry, train) : null;
+    if (!np) { st.t = 1; return true; }
+    if (role === 'tail' || role === 'both') delete train.mem[key(st.tile.x, st.tile.z)];
+    st.tile = nt; st.path = np; st.fwd = (np.a === entry); st.t = 0;
+    if (role === 'head' || role === 'both') { const idx = nt.paths.indexOf(np); train.mem[key(nt.x, nt.z)] = idx; if (nt.sw && entry !== nt.sw.trunk) setSwitch(nt, idx); }
+  }
+  return false;
+}
+function reverseState(st) { st.fwd = !st.fwd; st.t = 1 - st.t; }
+function stateWorld(st, out) { const p = st.path.curve.getPoint(st.fwd ? st.t : 1 - st.t); return out.set(p.x + st.tile.x * T + 2, 0, p.z + st.tile.z * T + 2); }
+function placeTrain(train, tile, entry, t) {
+  const p = choosePath(tile, entry, null); const head = { tile, path: p, fwd: p.a === entry, t };
+  train.cars.forEach((car, i) => { const st = { ...head }; reverseState(st); advance(st, i * CAR_SPACING, null, null); reverseState(st); Object.assign(car, st); car.mesh.rotation.set(0, 0, 0); car.mesh.position.y = 0; });
+  train.mem = {}; train.v = 0; train.target = null; train.route = null; train.hold = false; train.wrecked = false;
+  train.cars.forEach(c => { train.mem[key(c.tile.x, c.tile.z)] = c.tile.paths.indexOf(c.path); });
+  updateCarMeshes(train);
+}
+function sendHome(train) { const p = placeById(train.home); placeTrain(train, p.tile, Wn, 0.5); train.lastPlace = p; }
+trains.forEach(sendHome);
+function reverseTrain(train) {
+  train.cars.forEach(reverseState); train.cars.reverse(); train.mem = {};
+  train.cars.forEach(c => { train.mem[key(c.tile.x, c.tile.z)] = c.tile.paths.indexOf(c.path); });
+}
+function updateCarMeshes(train) {
+  for (const car of train.cars) {
+    const f = { ...car }; advance(f, 1.15, train, null); stateWorld(f, _a);
+    const b = { ...car }; reverseState(b); advance(b, 1.15, train, null); stateWorld(b, _b);
+    car.pos.copy(_a).add(_b).multiplyScalar(0.5);
+    car.mesh.position.set(car.pos.x, car.mesh.position.y, car.pos.z);
+    car.mesh.rotation.y = Math.atan2(-(_a.z - _b.z), _a.x - _b.x);
+  }
+}
+// route planning: BFS over (tile, exit) nodes
+function findRoute(startTile, startExit, goalTile) {
+  const q = [[startTile, startExit]]; const prev = new Map(); prev.set(key(startTile.x, startTile.z) + ':' + startExit, null);
+  let qi = 0;
+  while (qi < q.length) {
+    const [tile, exit] = q[qi++]; const nt = tileAt(tile.x + DX[exit], tile.z + DZ[exit]); if (!nt) continue; const entry = OPP(exit);
+    for (const p of nt.paths) {
+      if (!pathHas(p, entry)) continue; const ex = pathOther(p, entry); const k = key(nt.x, nt.z) + ':' + ex; if (prev.has(k)) continue; prev.set(k, [tile, exit]);
+      if (nt === goalTile) { const route = new Map(); let cur = [nt, ex]; while (cur) { route.set(key(cur[0].x, cur[0].z), cur[1]); cur = prev.get(key(cur[0].x, cur[0].z) + ':' + cur[1]); } return route; }
+      q.push([nt, ex]);
+    }
+  }
+  return null;
+}
+function dispatch(train, place) {
+  if (train.wrecked) return;
+  const goal = place.tile; const head = train.cars[0], tail = train.cars[train.cars.length - 1];
+  if (head.tile === goal) { toast(`${train.name} is already at ${place.name}.`); return; }
+  const r1 = findRoute(head.tile, head.fwd ? head.path.b : head.path.a, goal);
+  const r2 = findRoute(tail.tile, tail.fwd ? tail.path.a : tail.path.b, goal);
+  let route = r1;
+  if (r2 && (!r1 || r2.size < r1.size)) { reverseTrain(train); route = r2; }
+  if (!route) { toast(`No route from here to ${place.name}. Lay some track!`, 'bad'); return; }
+  train.target = place; train.route = route; train.hold = false; train.unload = 0;
+  toast(`${train.name} → ${place.name}`);
+}
+function replanAll() { for (const tr of trains) if (tr.target && !tr.wrecked) { const h = tr.cars[0]; tr.route = findRoute(h.tile, h.fwd ? h.path.b : h.path.a, tr.target.tile); } }
+
+let occupancy = new Map();
+function computeOccupancy() { occupancy = new Map(); for (const tr of trains) for (const c of tr.cars) { const k = key(c.tile.x, c.tile.z); if (!occupancy.has(k)) occupancy.set(k, new Set()); occupancy.get(k).add(tr); } }
+const occupiedByOther = (tile, train) => { const o = occupancy.get(key(tile.x, tile.z)); return !!o && (o.size > 1 || !o.has(train)); };
+
+function previewPath(nt, entry, train, distAhead) {
+  const c = nt.paths.filter(p => pathHas(p, entry)); if (!c.length) return null; if (c.length === 1) return c[0];
+  const k = key(nt.x, nt.z); const m = train.mem[k]; if (m !== undefined) return nt.paths[m];
+  if (game.autoRoute && train.route && train.route.has(k)) {
+    const ex = train.route.get(k); const idx = nt.paths.findIndex(p => pathHas(p, entry) && pathHas(p, ex));
+    if (idx >= 0) { if (nt.sw.state !== idx && distAhead < 8 && !occupancy.has(k)) setSwitch(nt, idx); return nt.paths[idx]; }
+  }
+  return nt.paths[nt.sw.state];
+}
+function lookahead(train) {
+  const head = train.cars[0]; const goal = train.target ? train.target.tile : null;
+  let tile = head.tile, path = head.path, exit = head.fwd ? path.b : path.a, t = head.t, dist = 0;
+  if (goal && tile === goal && t <= 0.5) return { dist: (0.5 - t) * path.len, reason: 'arriving' };
+  const rem = (1 - t) * path.len;
+  if (tile.signals[exit] && tile.signals[exit].state === 'red') return { dist: Math.max(0, rem - 0.5), reason: 'signal' };
+  dist += rem;
+  for (let i = 0; i < 10; i++) {
+    const nt = tileAt(tile.x + DX[exit], tile.z + DZ[exit]); const entry = OPP(exit);
+    if (!nt) return { dist: Math.max(0, dist - 0.5), reason: 'end of track' };
+    if (occupiedByOther(nt, train)) return { dist: Math.max(0, dist - 2.9), reason: 'train ahead' };
+    const np = previewPath(nt, entry, train, dist); if (!np) return { dist: Math.max(0, dist - 0.5), reason: 'end of track' };
+    if (goal && nt === goal) return { dist: dist + 0.5 * np.len, reason: 'arriving' };
+    const nexit = pathOther(np, entry);
+    if (nt.signals[nexit] && nt.signals[nexit].state === 'red') return { dist: dist + np.len - 0.5, reason: 'signal' };
+    dist += np.len; tile = nt; exit = nexit;
+  }
+  return { dist: Infinity, reason: '' };
+}
+function arrive(train) {
+  const place = train.target; train.target = null; train.route = null; train.unload = 3;
+  const origin = train.lastPlace && train.lastPlace.yard ? placeById('central') : train.lastPlace;
+  if (!place.yard && origin && origin !== place) {
+    const d = Math.abs(origin.stop[0] - place.stop[0]) + Math.abs(origin.stop[1] - place.stop[1]); const reward = 200 + 50 * d;
+    game.money += reward; game.deliveries++; game.served.add(place.id);
+    toast(`${train.name} delivered ${origin.name} → ${place.name}: +${fmtMoney(reward)}`, 'good');
+    if (['harbour', 'quarry', 'hilltown'].every(id => game.served.has(id)) && !game.allServed) { game.allServed = true; setTimeout(() => toast('🏆 All destinations served! Keep the island moving.', 'good'), 800); }
+  } else toast(`${train.name} arrived at ${place.name}.`);
+  train.lastPlace = place; updateHUD();
+}
+function crash(a, b, what) {
+  for (const tr of [a, b]) { if (!tr || tr.wrecked) continue; tr.wrecked = true; tr.wreckTimer = 5; tr.v = 0; tr.target = null; tr.route = null; tr.cars.forEach((c, i) => { c.mesh.rotation.z = (i % 2 ? 1 : -1) * 0.45; c.mesh.position.y = -0.15; }); }
+  game.money -= 800; toast(`💥 ${what} -$800`, 'bad'); updateHUD();
+}
+// smoke
+const smoke = []; const smokeGeo = new THREE.SphereGeometry(0.3, 6, 6);
+for (let i = 0; i < 60; i++) { const m = new THREE.Mesh(smokeGeo, new THREE.MeshBasicMaterial({ color: 0xdddddd, transparent: true, opacity: 0 })); m.visible = false; scene.add(m); smoke.push({ m, life: 0 }); }
+function puff(x, y, z, dark) { const s = smoke.find(s => s.life <= 0); if (!s) return; s.life = 1.4; s.m.visible = true; s.m.position.set(x, y, z); s.m.scale.setScalar(0.5); s.m.material.color.set(dark ? 0x333333 : 0xe0e0e0); }
+function updateSmoke(dt) { for (const s of smoke) { if (s.life <= 0) continue; s.life -= dt; s.m.position.y += dt * 1.6; s.m.position.x += dt * 0.4; s.m.scale.addScalar(dt * 0.9); s.m.material.opacity = clamp(s.life / 1.4, 0, 1) * 0.6; if (s.life <= 0) s.m.visible = false; } }
+
+function updateTrains(dt) {
+  computeOccupancy();
+  for (const tr of trains) {
+    if (tr.wrecked) {
+      tr.wreckTimer -= dt; if (Math.random() < dt * 6) puff(tr.cars[0].pos.x, 2, tr.cars[0].pos.z, true);
+      if (tr.wreckTimer <= 0) { const home = placeById(tr.home); if (!occupiedByOther(home.tile, tr)) { sendHome(tr); toast(`${tr.name} returned to the yard.`); } else tr.wreckTimer = 1; }
+      tr.status = 'Wrecked — recovering'; continue;
+    }
+    if (tr.unload > 0) tr.unload -= dt;
+    const head = tr.cars[0];
+    const la = lookahead(tr);
+    let vmax = tr.target ? MAXV : 0;
+    if (head.path.isCurve) vmax = Math.min(vmax, CURVEV); if (head.tile.sw) vmax = Math.min(vmax, SWITCHV);
+    if (tr.hold) la.dist = 0;
+    const allowed = la.dist === Infinity ? vmax : Math.min(vmax, Math.sqrt(2 * DECEL * Math.max(0, la.dist)));
+    if (tr.v < allowed) tr.v = Math.min(allowed, tr.v + ACC * dt); else tr.v = Math.max(allowed, tr.v - DECEL * dt);
+    let d = tr.v * dt; if (la.dist <= d || la.dist <= 0.03) { d = Math.max(0, la.dist); tr.v = 0; }
+    if (d > 0) { const n = tr.cars.length; tr.cars.forEach((c, i) => advance(c, d, tr, n === 1 ? 'both' : i === 0 ? 'head' : i === n - 1 ? 'tail' : 'mid')); }
+    updateCarMeshes(tr);
+    if (tr.target && head.tile === tr.target.tile && Math.abs(head.t - 0.5) < 0.03 && tr.v === 0) arrive(tr);
+    if (tr.v > 0.5) { tr.smokeT -= dt * (0.6 + tr.v / MAXV); if (tr.smokeT <= 0) { tr.smokeT = 0.18; const m = head.mesh; const o = new THREE.Vector3(1.15, 2.7, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), m.rotation.y); puff(m.position.x + o.x, o.y, m.position.z + o.z, false); } }
+    // status text
+    if (tr.hold) tr.status = 'Holding (brakes on)';
+    else if (tr.target) tr.status = tr.v > 0.05 ? `En route to ${tr.target.name} · ${(tr.v * 12).toFixed(0)} km/h` : la.reason === 'signal' ? '🚦 Waiting at red signal' : la.reason === 'train ahead' ? '⚠️ Waiting: train ahead' : la.reason === 'end of track' ? '⛔ Stopped: end of track' : 'Departing…';
+    else if (tr.unload > 0) tr.status = `Loading at ${tr.lastPlace ? tr.lastPlace.name : '?'}`;
+    else tr.status = head.tile.place ? `Parked at ${head.tile.place.name}` : la.reason === 'end of track' ? '⛔ Stopped: end of track' : 'Stopped';
+  }
+  // collisions
+  for (let i = 0; i < trains.length; i++) for (let j = i + 1; j < trains.length; j++) {
+    const a = trains[i], b = trains[j]; if (a.wrecked && b.wrecked) continue;
+    outer: for (const ca of a.cars) for (const cb of b.cars) if (ca.pos.distanceToSquared(cb.pos) < 2.3 * 2.3) { crash(a, b, `${a.name} and ${b.name} collided!`); break outer; }
+  }
+  selMarker.visible = !!game.selected; if (game.selected) { const m = game.selected.cars[0].mesh; selMarker.position.set(m.position.x, 4.2 + Math.sin(game.time * 4) * 0.25, m.position.z); }
+}
+
+// ---------- roads: cars & crossings ----------
+const roads = [{ axis: 0, c: ROAD_X * T + 2, L: MAPH * T, crossings: [] }, { axis: 1, c: ROAD_Z * T + 2, L: MAPW * T, crossings: [] }];
+function refreshCrossings() { roads.forEach(r => r.crossings = []); for (const row of tiles) for (const t of row) if (t.crossing) roads[t.roadAxis].crossings.push(t); }
+const roadCars = [];
+function buildRoadCar() {
+  const g = new THREE.Group(); const col = [0xe8e8e8, 0xd94b3d, 0x3d6fd9, 0xf2c14e, 0x3a3a3a, 0x7bc47f][Math.floor(rnd() * 6)];
+  box(2.0, 0.55, 1.0, new THREE.MeshLambertMaterial({ color: col }), 0, 0.55, 0, g); box(1.1, 0.5, 0.9, new THREE.MeshLambertMaterial({ color: 0x9fd0e8 }), -0.15, 1.05, 0, g);
+  for (const x of [-0.65, 0.65]) for (const z of [-0.5, 0.5]) { const w = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.2, 10), MAT.dark); w.position.set(x, 0.24, z); w.rotation.x = Math.PI / 2; g.add(w); }
+  scene.add(g); return g;
+}
+for (const r of roads) for (const lane of [1, -1]) for (let i = 0; i < 3; i++) roadCars.push({ road: r, lane, s: (i / 3) * r.L + rnd() * 10, v: 5, mesh: buildRoadCar() });
+function updateRoads(dt) {
+  // gates
+  for (const r of roads) for (const t of r.crossings) {
+    const cr = t.crossing; let near = false;
+    for (const tr of trains) { for (const c of tr.cars) if (c.pos.distanceToSquared(cr.center) < 16 * 16) { near = true; break; } if (near) break; }
+    cr.gate = clamp(cr.gate + (near ? 1 : -1) * dt * 0.7, 0, 1);
+    cr.pivots.forEach(p => p.rotation.z = (1 - cr.gate) * Math.PI / 2);
+    const on = near || cr.gate > 0; const ph = Math.floor(game.time * 2.5) % 2;
+    cr.lamps.forEach((lm, i) => lm.color.set(on && (i % 2 === ph) ? 0xff2020 : 0x3a0808));
+  }
+  // cars
+  const lanes = new Map();
+  for (const car of roadCars) { const k = car.road.axis + ':' + car.lane; if (!lanes.has(k)) lanes.set(k, []); lanes.get(k).push(car); }
+  for (const list of lanes.values()) {
+    list.sort((a, b) => a.s - b.s);
+    list.forEach((car, i) => {
+      const r = car.road; const pos = car.lane > 0 ? car.s : r.L - car.s; let stop = false;
+      for (const ct of r.crossings) { const a0 = (r.axis === 0 ? ct.z : ct.x) * T; const gap = car.lane > 0 ? a0 - pos : pos - (a0 + T); if (gap > -0.3 && gap < 3.4 && ct.crossing.gate > 0.02) stop = true; }
+      const next = list[i + 1]; if (next && next.s - car.s < 3.6) stop = true;
+      const tv = stop ? 0 : 5.5; car.v = tv > car.v ? Math.min(tv, car.v + 5 * dt) : Math.max(tv, car.v - 16 * dt);
+      car.s += car.v * dt; if (car.s > r.L + 3) car.s = -3;
+      const p2 = car.lane > 0 ? car.s : r.L - car.s;
+      if (r.axis === 0) { car.mesh.position.set(r.c + (car.lane > 0 ? -0.95 : 0.95), 0, p2); car.mesh.rotation.y = Math.atan2(-car.lane, 0); }
+      else { car.mesh.position.set(p2, 0, r.c + (car.lane > 0 ? 0.95 : -0.95)); car.mesh.rotation.y = Math.atan2(0, car.lane); }
+      // hit by a train?
+      for (const ct of r.crossings) { const a0 = (r.axis === 0 ? ct.z : ct.x) * T; if (p2 < a0 - 1 || p2 > a0 + T + 1) continue; for (const tr of trains) for (const c of tr.cars) if (c.pos.distanceToSquared(car.mesh.position) < 2.1 * 2.1) { car.s = -3; car.v = 0; game.money -= 300; toast('🚗💥 A car was hit on the level crossing! -$300', 'bad'); updateHUD(); puff(car.mesh.position.x, 1.5, car.mesh.position.z, true); } }
+    });
+  }
+}
+
+// ---------- building logic ----------
+function pathCost(p) { return p.isCurve ? COST.curve : COST.straight; }
+function mergePair(tile, cur, pair) {
+  const [a, b] = pair; const np = getPath(a, b);
+  if (tile.terrain === 'water') return { err: 'Cannot lay track on water' };
+  if (tile.terrain === 'block') return { err: 'A building is in the way' };
+  if (cur.includes(np)) return { paths: cur, cost: 0 };
+  if (tile.locked) return { err: 'This track is part of the station/yard and cannot change' };
+  if (tile.terrain === 'road') { if (np.isCurve || cur.length) return { err: 'Track must cross a road straight and at right angles' }; if ((tile.roadAxis === 0 && OPP(a) === b && a % 2 === 1) || (tile.roadAxis === 1 && OPP(a) === b && a % 2 === 0)) { } else return { err: tile.roadAxis === 2 ? 'Cannot cross a road junction' : 'Track must cross the road at right angles' }; }
+  if (cur.length >= 2) return { err: 'This tile already has two tracks' };
+  let cost = pathCost(np);
+  if (cur.length === 1) { const q = cur[0]; const shared = [a, b].filter(e => pathHas(q, e)).length; if (shared === 2) return { paths: cur, cost: 0 }; cost += shared === 1 ? COST.switch : COST.diamond; }
+  if (tile.terrain === 'hill') cost += COST.tunnel; if (tile.terrain === 'road') cost += COST.crossing;
+  if (occupancy.has(key(tile.x, tile.z))) return { err: 'A train is on that tile' };
+  return { paths: [...cur, np], cost };
+}
+function chooseEndEdge(tile, d) { if (!tile.paths.length) return OPP(d); const edges = new Set(); tile.paths.forEach(p => { edges.add(p.a); edges.add(p.b); }); if (edges.has(OPP(d))) return OPP(d); for (const e of edges) if (e !== d) return e; return OPP(d); }
+function planFromPath(pathTiles) {
+  const plan = []; const n = pathTiles.length;
+  if (n === 1) return null;
+  for (let i = 0; i < n; i++) {
+    const t = pathTiles[i]; let a, b;
+    const dirTo = (o) => [0, 1, 2, 3].find(d => t.x + DX[d] === o.x && t.z + DZ[d] === o.z);
+    if (i === 0) { b = dirTo(pathTiles[1]); a = chooseEndEdge(t, b); }
+    else if (i === n - 1) { a = dirTo(pathTiles[n - 2]); b = chooseEndEdge(t, a); }
+    else { a = dirTo(pathTiles[i - 1]); b = dirTo(pathTiles[i + 1]); }
+    if (a === b) continue;
+    plan.push({ tile: t, pair: [a, b] });
+  }
+  return plan;
+}
+function evaluatePlan(plan) {
+  let total = 0; const out = []; const tmp = new Map();
+  for (const step of plan) { const k = key(step.tile.x, step.tile.z); const cur = tmp.get(k) || step.tile.paths; const r = mergePair(step.tile, cur, step.pair); if (r.err) return { err: r.err, tile: step.tile }; tmp.set(k, r.paths); total += r.cost; out.push({ tile: step.tile, paths: r.paths, cost: r.cost }); }
+  return { total, out };
+}
+function applyTrack(res) {
+  game.money -= res.total; const changed = new Set();
+  for (const o of res.out) { if (o.paths === o.tile.paths) continue; o.tile.paths = o.paths; recomputeSwitch(o.tile); if (o.tile.tree) { staticGroup.remove(o.tile.tree); o.tile.tree = null; } changed.add(o.tile); }
+  for (const t of changed) rebuildTile(t);
+  afterTrackChange();
+}
+function afterTrackChange() { updateTerrain(); refreshCrossings(); replanAll(); updateHUD(); }
+function eraseTile(tile) {
+  if (!tile.paths.length) { return false; }
+  if (tile.locked) { toast('Station and yard track cannot be removed', 'bad'); return false; }
+  if (occupancy.has(key(tile.x, tile.z))) { toast('A train is on that tile', 'bad'); return false; }
+  let refund = 0; tile.paths.forEach(p => refund += pathCost(p)); if (tile.sw) refund += COST.switch; if (tile.terrain === 'hill') refund += COST.tunnel; if (tile.terrain === 'road') refund += COST.crossing; refund += Object.keys(tile.signals).length * COST.signal;
+  refund = Math.round(refund / 2); game.money += refund;
+  tile.paths = []; tile.sw = null; tile.signals = {}; rebuildTile(tile); afterTrackChange(); toast(`Removed track, +${fmtMoney(refund)} refund`); return true;
+}
+function rotateTile(tile) {
+  if (tile.paths.length !== 1 || tile.locked) return false;
+  if (occupancy.has(key(tile.x, tile.z))) { toast('A train is on that tile', 'bad'); return false; }
+  if (Object.keys(tile.signals).length) { toast('Remove the signal before rotating', 'bad'); return false; }
+  const p = tile.paths[0]; const np = getPath((p.a + 1) & 3, (p.b + 1) & 3);
+  if (tile.terrain === 'road') { toast('A crossing must stay at right angles to the road', 'bad'); return false; }
+  tile.paths = [np]; rebuildTile(tile); afterTrackChange(); return true;
+}
+function placeSingle(tile) {
+  if (tile.paths.length) return rotateTile(tile);
+  const conn = d => { const nb = tileAt(tile.x + DX[d], tile.z + DZ[d]); return nb && nb.paths.some(p => pathHas(p, OPP(d))); };
+  let pair = [E, Wn]; if (!conn(E) && !conn(Wn) && (conn(N) || conn(S))) pair = [N, S];
+  if (tile.terrain === 'road') pair = tile.roadAxis === 0 ? [E, Wn] : [N, S];
+  const r = evaluatePlan([{ tile, pair }]); if (r.err) { toast(r.err, 'bad'); return false; }
+  if (r.total > game.money) { toast('Not enough money', 'bad'); return false; }
+  applyTrack(r); return true;
+}
+function placeSignal(tile, local) {
+  if (!tile.paths.length) { toast('Signals go on track', 'bad'); return; }
+  const edges = new Set(); tile.paths.forEach(p => { edges.add(p.a); edges.add(p.b); });
+  let best = -1, bd = -Infinity; for (const e of edges) { const d = local.x * EM[e][0] + local.z * EM[e][1]; if (d > bd) { bd = d; best = e; } }
+  if (tile.signals[best]) { toggleSignal(tile, best); return; }
+  if (game.money < COST.signal) { toast('Not enough money', 'bad'); return; }
+  game.money -= COST.signal; tile.signals[best] = { state: 'red' }; rebuildTile(tile); updateHUD(); toast(`Signal placed (red) for trains leaving ${DN[best]}`);
+}
+function toggleSignal(tile, edge) { const s = tile.signals[edge]; s.state = s.state === 'red' ? 'green' : 'red'; updateSignalVisual(s); }
+function removeSignal(tile, edge) { delete tile.signals[edge]; game.money += COST.signal / 2; rebuildTile(tile); updateHUD(); toast('Signal removed'); }
+function toggleSwitch(tile) { if (occupancy.has(key(tile.x, tile.z))) { toast('A train is on the switch', 'bad'); return; } setSwitch(tile, tile.sw.state ? 0 : 1); }
+
+// ---------- save / load ----------
+function saveGame() {
+  const data = { money: game.money, deliveries: game.deliveries, served: [...game.served], tiles: [] };
+  for (const row of tiles) for (const t of row) if (t.paths.length || Object.keys(t.signals).length) data.tiles.push({ x: t.x, z: t.z, p: t.paths.map(p => [p.a, p.b]), s: t.sw ? t.sw.state : 0, g: Object.fromEntries(Object.entries(t.signals).map(([e, s]) => [e, s.state])) });
+  try { localStorage.setItem('islandrail-save', JSON.stringify(data)); toast('Layout saved', 'good'); } catch (e) { toast('Could not save (storage blocked)', 'bad'); }
+}
+function loadGame() {
+  let data; try { data = JSON.parse(localStorage.getItem('islandrail-save')); } catch (e) { }
+  if (!data) { toast('No saved layout found', 'bad'); return; }
+  for (const row of tiles) for (const t of row) if (!t.locked) { t.paths = []; t.sw = null; t.signals = {}; }
+  for (const s of data.tiles) { const t = tileAt(s.x, s.z); if (!t) continue; if (!t.locked) { t.paths = s.p.map(([a, b]) => getPath(a, b)); recomputeSwitch(t); if (t.sw) t.sw.state = s.s; } t.signals = {}; for (const e in s.g) t.signals[e] = { state: s.g[e] }; if (t.tree && t.paths.length) { staticGroup.remove(t.tree); t.tree = null; } }
+  game.money = data.money; game.deliveries = data.deliveries; game.served = new Set(data.served || []);
+  for (const row of tiles) for (const t of row) rebuildTile(t);
+  trains.forEach(sendHome); game.selected = null; afterTrackChange(); toast('Layout loaded', 'good');
+}
+
+// ---------- HUD ----------
+const $ = id => document.getElementById(id);
+const toastBox = $('toast');
+function toast(msg, kind = '') { const d = document.createElement('div'); d.className = 'toast ' + kind; d.textContent = msg; toastBox.appendChild(d); while (toastBox.children.length > 4) toastBox.firstChild.remove(); setTimeout(() => { d.style.transition = 'opacity .4s'; d.style.opacity = '0'; setTimeout(() => d.remove(), 420); }, 3200); }
+function updateHUD() {
+  $('money').textContent = fmtMoney(game.money); $('money').style.color = game.money < 0 ? '#ff6b6b' : ''; $('deliv').textContent = game.deliveries;
+  $('objective').innerHTML = 'Serve ' + ['harbour', 'quarry', 'hilltown'].map(id => `<b class="${game.served.has(id) ? 'done' : ''}">${placeById(id).name}${game.served.has(id) ? ' ✓' : ''}</b>`).join(', ') + ' from Central Station.';
+}
+function renderTrainList() {
+  $('trainList').innerHTML = trains.map((tr, i) => `<button class="train-btn ${game.selected === tr ? 'sel' : ''}" data-i="${i}"><span class="dot" style="background:#${tr.color.toString(16).padStart(6, '0')}"></span><span>${tr.name}</span><span class="st">${tr.status}</span></button>`).join('');
+  $('trainList').querySelectorAll('button').forEach(b => b.onclick = () => selectTrain(trains[+b.dataset.i]));
+  const sel = game.selected; $('sel').style.display = sel ? 'block' : 'none';
+  if (sel) {
+    $('selName').textContent = sel.name; $('selStat').textContent = sel.status;
+    const head = sel.cars[0];
+    $('destBtns').querySelectorAll('button').forEach(b => { const p = placeById(b.dataset.p); b.disabled = sel.wrecked || (sel.target === p) || (!sel.target && head.tile === p.tile); });
+    $('btnHold').classList.toggle('on', sel.hold); $('btnHold').textContent = sel.hold ? '▶ Release' : '⏸ Hold';
+    $('btnFollow').classList.toggle('on', game.follow);
+  }
+}
+$('destBtns').innerHTML = PLACES.map(p => `<button data-p="${p.id}">${p.icon} ${p.name.replace('Yard Road', 'Yard')}</button>`).join('');
+$('destBtns').querySelectorAll('button').forEach(b => b.onclick = () => { if (game.selected) { dispatch(game.selected, placeById(b.dataset.p)); renderTrainList(); } });
+$('btnHold').onclick = () => { if (game.selected) { game.selected.hold = !game.selected.hold; renderTrainList(); } };
+$('btnReverse').onclick = () => { const tr = game.selected; if (!tr || tr.wrecked) return; reverseTrain(tr); if (tr.target) { const h = tr.cars[0]; tr.route = findRoute(h.tile, h.fwd ? h.path.b : h.path.a, tr.target.tile); } toast(`${tr.name} reversed`); };
+$('btnFollow').onclick = () => { game.follow = !game.follow; renderTrainList(); };
+$('btnSave').onclick = saveGame; $('btnLoad').onclick = loadGame;
+$('btnHelp').onclick = () => $('help').style.display = 'flex'; $('btnStart').onclick = () => $('help').style.display = 'none';
+$('autoRoute').onchange = e => { game.autoRoute = e.target.checked; };
+function selectTrain(tr) { game.selected = tr; if (tr) { $('help').style.display = 'none'; } renderTrainList(); }
+function setTool(t) { game.tool = t; document.querySelectorAll('#tools .tb[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === t)); $('status').textContent = { select: 'Click switches to throw them, signals to toggle, trains to control.', track: 'Drag across the ground to lay track. Click a piece to rotate it.', signal: 'Click near the end of a track piece to place a signal.', erase: 'Click track or a signal to remove it (half refund).' }[t]; canvas.style.cursor = t === 'track' ? 'cell' : t === 'erase' ? 'not-allowed' : 'pointer'; drawPath = null; clearGhosts(); }
+document.querySelectorAll('#tools .tb[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+
+// ---------- input ----------
+const raycaster = new THREE.Raycaster(); const ndc = new THREE.Vector2();
+const ghostGeo = new THREE.PlaneGeometry(3.8, 3.8); const ghosts = []; let hoverGhost = null;
+function getGhost(i) { while (ghosts.length <= i) { const m = new THREE.Mesh(ghostGeo, MAT.ghostOk); m.rotation.x = -Math.PI / 2; m.visible = false; scene.add(m); ghosts.push(m); } return ghosts[i]; }
+function clearGhosts() { ghosts.forEach(g => g.visible = false); }
+function pick(ev) {
+  const r = canvas.getBoundingClientRect(); ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const res = { tile: null, local: null, sig: null, train: null };
+  const hs = raycaster.intersectObjects(signalPickables, true); if (hs.length) res.sig = hs[0].object.userData.sig;
+  const ht = raycaster.intersectObjects(trainGroup.children, true); if (ht.length) res.train = ht[0].object.userData.train;
+  const hg = raycaster.intersectObject(ground); if (hg.length) { const p = hg[0].point; const t = tileAt(Math.floor(p.x / T), Math.floor(p.z / T)); if (t) { res.tile = t; res.local = new THREE.Vector3(p.x - t.x * T - 2, 0, p.z - t.z * T - 2); } }
+  return res;
+}
+let drag = null, drawPath = null;
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('pointerdown', ev => {
+  canvas.setPointerCapture(ev.pointerId); $('help').style.display = 'none';
+  drag = { x: ev.clientX, y: ev.clientY, sx: ev.clientX, sy: ev.clientY, button: ev.button, moved: false, pan: ev.button === 2 || ev.button === 1 || ev.shiftKey };
+  if (ev.button === 0 && !ev.shiftKey && game.tool === 'track') { const p = pick(ev); if (p.tile) { drawPath = [p.tile]; drag = null; showPathGhost(); } }
+});
+canvas.addEventListener('pointermove', ev => {
+  if (drawPath) { const p = pick(ev); if (p.tile && p.tile !== drawPath[drawPath.length - 1]) { extendPath(p.tile); showPathGhost(); } return; }
+  if (drag) {
+    const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y; drag.x = ev.clientX; drag.y = ev.clientY; if (Math.abs(ev.clientX - drag.sx) + Math.abs(ev.clientY - drag.sy) > 4) drag.moved = true;
+    if (drag.pan) { const s = cam.dist * 0.0016; const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw), rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw); cam.target.x += (-rx * dx + fx * dy) * s; cam.target.z += (-rz * dx + fz * dy) * s; game.follow = false; }
+    else { cam.yaw -= dx * 0.006; cam.pitch = clamp(cam.pitch + dy * 0.005, 0.2, 1.45); }
+    return;
+  }
+  const p = pick(ev); hoverTile(p);
+});
+canvas.addEventListener('pointerup', ev => {
+  if (drawPath) { commitPath(); drawPath = null; clearGhosts(); return; }
+  if (!drag) return; const wasClick = !drag.moved && drag.button === 0 && !drag.pan; drag = null; if (wasClick) click(ev);
+});
+canvas.addEventListener('wheel', ev => { cam.dist = clamp(cam.dist * (1 + Math.sign(ev.deltaY) * 0.1), 12, 170); ev.preventDefault(); }, { passive: false });
+function hoverTile(p) {
+  if (!hoverGhost) { hoverGhost = new THREE.Mesh(ghostGeo, MAT.ghostHover); hoverGhost.rotation.x = -Math.PI / 2; scene.add(hoverGhost); }
+  hoverGhost.visible = !!p.tile && game.tool !== 'select';
+  if (p.tile) { const c = tileCenter(p.tile); hoverGhost.position.set(c.x, 0.15 + (p.tile.terrain === 'hill' ? HILL_H + 0.6 : 0), c.z); }
+}
+function extendPath(t) {
+  const last = drawPath[drawPath.length - 1];
+  if (drawPath.length > 1 && drawPath[drawPath.length - 2] === t) { drawPath.pop(); return; }
+  if (drawPath.includes(t)) return;
+  let cx = last.x, cz = last.z; const steps = [];
+  while (cx !== t.x) { cx += Math.sign(t.x - cx); steps.push(tileAt(cx, cz)); }
+  while (cz !== t.z) { cz += Math.sign(t.z - cz); steps.push(tileAt(cx, cz)); }
+  for (const s of steps) { if (drawPath.includes(s) || drawPath.length > 80) return; drawPath.push(s); }
+}
+function showPathGhost() {
+  clearGhosts(); const plan = planFromPath(drawPath); const res = plan ? evaluatePlan(plan) : null;
+  drawPath.forEach((t, i) => { const g = getGhost(i); const c = tileCenter(t); g.position.set(c.x, 0.2 + (t.terrain === 'hill' ? HILL_H + 0.6 : 0), c.z); g.material = (res && !res.err && res.total <= game.money) || (res && res.err && res.tile !== t) ? MAT.ghostOk : MAT.ghostBad; g.visible = true; });
+  $('status').textContent = !res ? 'Drag to lay track…' : res.err ? '✖ ' + res.err : `${drawPath.length} tiles · ${fmtMoney(res.total)}${res.total > game.money ? ' — not enough money' : ''}`;
+}
+function commitPath() {
+  if (drawPath.length === 1) { placeSingle(drawPath[0]); setTool('track'); return; }
+  const plan = planFromPath(drawPath); const res = evaluatePlan(plan);
+  if (res.err) { toast(res.err, 'bad'); } else if (res.total > game.money) toast('Not enough money', 'bad'); else { applyTrack(res); toast(`Track laid: ${fmtMoney(res.total)}`); }
+  setTool('track');
+}
+function click(ev) {
+  const p = pick(ev);
+  if (game.tool === 'select') {
+    if (p.sig) { toggleSignal(p.sig.tile, p.sig.edge); return; }
+    if (p.train) { selectTrain(p.train); return; }
+    if (p.tile && p.tile.sw) { toggleSwitch(p.tile); return; }
+    if (p.tile && p.tile.place) { toast(`${p.tile.place.icon} ${p.tile.place.name}`); return; }
+    if (game.selected) selectTrain(null);
+  } else if (game.tool === 'signal') {
+    if (p.sig) { toggleSignal(p.sig.tile, p.sig.edge); return; }
+    if (p.tile) placeSignal(p.tile, p.local);
+  } else if (game.tool === 'erase') {
+    if (p.sig) { removeSignal(p.sig.tile, p.sig.edge); return; }
+    if (p.tile && !eraseTile(p.tile) && !p.tile.paths.length) toast('Nothing to erase here');
+  }
+}
+const keys = {};
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return; keys[e.key.toLowerCase()] = true;
+  if (e.key === '1') setTool('select'); if (e.key === '2') setTool('track'); if (e.key === '3') setTool('signal'); if (e.key === '4') setTool('erase');
+  if (e.key === 'Escape') { setTool('select'); selectTrain(null); $('help').style.display = 'none'; }
+  if (e.key === 'h' || e.key === 'H') $('help').style.display = $('help').style.display === 'none' ? 'flex' : 'none';
+});
+addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+// ---------- main loop ----------
+for (const row of tiles) for (const t of row) if (t.paths.length || Object.keys(t.signals).length) rebuildTile(t);
+afterTrackChange(); setTool('select'); renderTrainList();
+let last = performance.now(), uiT = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; game.time += dt;
+  const sp = cam.dist * 0.9 * dt; const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw), rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
+  if (keys['w'] || keys['arrowup']) { cam.target.x += fx * sp; cam.target.z += fz * sp; game.follow = false; }
+  if (keys['s'] || keys['arrowdown']) { cam.target.x -= fx * sp; cam.target.z -= fz * sp; game.follow = false; }
+  if (keys['a'] || keys['arrowleft']) { cam.target.x -= rx * sp; cam.target.z -= rz * sp; game.follow = false; }
+  if (keys['d'] || keys['arrowright']) { cam.target.x += rx * sp; cam.target.z += rz * sp; game.follow = false; }
+  if (keys['q']) cam.yaw += dt * 1.5; if (keys['e']) cam.yaw -= dt * 1.5;
+  cam.target.x = clamp(cam.target.x, -10, MAPW * T + 10); cam.target.z = clamp(cam.target.z, -10, MAPH * T + 10);
+  if (game.follow && game.selected) { const m = game.selected.cars[0].mesh; cam.target.lerp(new THREE.Vector3(m.position.x, 0, m.position.z), 1 - Math.pow(0.02, dt)); }
+  updateTrains(dt); updateRoads(dt); updateSmoke(dt);
+  updateCamera(); renderer.render(scene, camera);
+  uiT += dt; if (uiT > 0.25) { uiT = 0; renderTrainList(); }
+}
+requestAnimationFrame(frame);
+// debug / modding hooks
+window.IslandRail = { cam, updateCamera, crash, placeSignal, rotateTile, game, trains, tiles, tileAt, PLACES, placeById, planFromPath, evaluatePlan, applyTrack, dispatch, toggleSignal, setSwitch, eraseTile, findRoute, lookahead };
+</script>
+</body>
+</html>

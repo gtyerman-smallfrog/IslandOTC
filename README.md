@@ -11,6 +11,20 @@ actions in one place — KPIs, charts, and sortable/searchable tables.
 
 ![tabs: Overview · Devices · Users · Credentials · Audit Events · Admin Actions](https://img.shields.io/badge/views-6-blue) ![no build](https://img.shields.io/badge/build-none-success) ![deps](https://img.shields.io/badge/dependencies-0-success)
 
+## Bonus: Island Rail — a 3D train-set game
+
+`train-set/index.html` is a self-contained 3D train-set game (three.js, no build
+step). Open it directly or serve the repo and visit `/train-set/`.
+
+- Starts with **Central Station** and a three-road **holding yard** with trains parked.
+- **Drag to lay track** to the Harbour, Quarry and Hilltown. Branch off a line for a
+  switch, cross a line at right angles for a diamond.
+- Track over a **road** becomes a level crossing with boom gates and queuing cars;
+  track through a **hill** becomes a tunnel with portals (both cost extra).
+- Trains **obey the track controls**: red signals, switch settings, trains ahead,
+  curve speed limits. Two trains on one tile is a crash.
+- Deliveries between places earn money; Save/Load keeps your layout in the browser.
+
 ## Quick start
 
 ```bash
