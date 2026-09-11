@@ -9,6 +9,8 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1218; color: #e8edf3; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   #c { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+  .hud, #help { -webkit-user-select: none; user-select: none; }
+  button, label.chk { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
   .hud { position: absolute; z-index: 5; pointer-events: none; }
   .hud > * { pointer-events: auto; }
   #top { top: 12px; left: 12px; right: 12px; display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
@@ -61,12 +63,29 @@
   #help li { margin: 3px 0; }
   #help kbd { font: 11px ui-monospace, monospace; background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px; }
   #help .start { margin-top: 16px; width: 100%; padding: 12px; border-radius: 10px; border: none; background: var(--accent); color: #1a1a1a; font-weight: 700; font-size: 15px; cursor: pointer; }
+  #zoomCtl { display: none; right: 12px; bottom: 132px; flex-direction: column; gap: 8px; }
+  body.touch #zoomCtl { display: flex; }
+  #zoomCtl button { width: 46px; height: 46px; font-size: 24px; line-height: 1; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: #fff; cursor: pointer; backdrop-filter: blur(6px); }
+  #panelToggle { display: none; position: absolute; top: 12px; right: 12px; z-index: 6; padding: 9px 12px; font-size: 18px; line-height: 1; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: #fff; cursor: pointer; backdrop-filter: blur(6px); }
+  #panelToggle.on { border-color: var(--accent); background: rgba(244,197,66,0.2); }
   @media (max-width: 720px) {
-    #tools { width: 150px; }
-    #tools .tb kbd { display: none; }
-    #panel { width: 200px; }
     #hint { display: none; }
     #objective { display: none; }
+    #panelToggle { display: block; }
+    #top { top: 8px; left: 8px; right: 62px; }
+    #stats { padding: 7px 10px; font-size: 12.5px; gap: 14px; }
+    /* tools become a bottom bar of icons so the map keeps the screen */
+    #tools { top: auto; bottom: 8px; left: 8px; right: 8px; width: auto; flex-direction: row; gap: 8px; align-items: stretch; }
+    #tools > .card { flex-direction: row !important; align-items: center; gap: 6px; padding: 6px; }
+    #tools > .card:first-child { flex: 1; }
+    #tools .tb { padding: 10px 6px; justify-content: center; }
+    #tools .tb .lbl, #tools .tb kbd, #tools label.chk { display: none; }
+    #tools .tb .ic { font-size: 18px; width: auto; }
+    #status { position: absolute; left: 0; bottom: calc(100% + 8px); width: max-content; max-width: calc(100vw - 84px); margin: 0; padding: 7px 10px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); z-index: 5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* trains ride in a sheet you open, instead of covering the map */
+    #panel { top: 56px; bottom: 116px; left: 8px; right: 8px; width: auto; overflow-y: auto; display: none; }
+    body.panel-open #panel { display: flex; }
+    #zoomCtl { bottom: 84px; right: 8px; }
   }
 </style>
 </head>
@@ -83,17 +102,17 @@
 
 <div id="tools" class="hud">
   <div class="card" style="display:flex;flex-direction:column;gap:6px">
-    <button class="tb active" data-tool="select"><span class="ic">🖱️</span>Select / Switch<kbd>1</kbd></button>
-    <button class="tb" data-tool="track"><span class="ic">🛤️</span>Lay Track<kbd>2</kbd></button>
-    <button class="tb" data-tool="signal"><span class="ic">🚦</span>Signal<kbd>3</kbd></button>
-    <button class="tb" data-tool="erase"><span class="ic">🧹</span>Erase<kbd>4</kbd></button>
+    <button class="tb active" data-tool="select"><span class="ic">🖱️</span><span class="lbl">Select / Switch</span><kbd>1</kbd></button>
+    <button class="tb" data-tool="track"><span class="ic">🛤️</span><span class="lbl">Lay Track</span><kbd>2</kbd></button>
+    <button class="tb" data-tool="signal"><span class="ic">🚦</span><span class="lbl">Signal</span><kbd>3</kbd></button>
+    <button class="tb" data-tool="erase"><span class="ic">🧹</span><span class="lbl">Erase</span><kbd>4</kbd></button>
     <label class="chk"><input type="checkbox" id="autoRoute" checked> Auto-set switches</label>
     <div id="status">Drag to lay track.</div>
   </div>
   <div class="card row">
-    <button class="tb" id="btnSave" title="Save layout">💾 Save</button>
-    <button class="tb" id="btnLoad" title="Load layout">📂 Load</button>
-    <button class="tb" id="btnHelp" title="Help">❔</button>
+    <button class="tb" id="btnSave" title="Save layout"><span class="ic">💾</span><span class="lbl">Save</span></button>
+    <button class="tb" id="btnLoad" title="Load layout"><span class="ic">📂</span><span class="lbl">Load</span></button>
+    <button class="tb" id="btnHelp" title="Help"><span class="ic">❔</span></button>
   </div>
 </div>
 
@@ -115,6 +134,11 @@
   </div>
 </div>
 
+<button id="panelToggle" aria-label="Show trains">🚂</button>
+<div id="zoomCtl" class="hud">
+  <button id="zoomIn" aria-label="Zoom in">+</button>
+  <button id="zoomOut" aria-label="Zoom out">−</button>
+</div>
 <div id="toast"></div>
 <div id="hint" class="hud">Left-drag: orbit (or lay track) · Right-drag: pan · Wheel: zoom · WASD: move · Click a switch to throw it · Click a signal to change it</div>
 
@@ -136,6 +160,7 @@
       <li><kbd>1</kbd> <b>Select</b>: click a switch to throw it, click a train to open its control panel and send it somewhere.</li>
       <li><kbd>4</kbd> <b>Erase</b>: remove track or signals (half refund).</li>
       <li>Camera: left-drag orbit, right-drag or <kbd>Shift</kbd>+drag pan, wheel zoom, <kbd>W A S D</kbd> move, <kbd>Q</kbd>/<kbd>E</kbd> rotate.</li>
+      <li>On a touchscreen: one finger orbits (or lays track), <b>two fingers pinch to zoom and drag to move around the island</b>. The + and − buttons zoom as well, and 🚂 opens the train list.</li>
     </ul>
     <button class="start" id="btnStart">Start building</button>
   </div>
@@ -852,10 +877,11 @@ $('btnHold').onclick = () => { if (game.selected) { game.selected.hold = !game.s
 $('btnReverse').onclick = () => { const tr = game.selected; if (!tr || tr.wrecked) return; reverseTrain(tr); if (tr.target) { const h = tr.cars[0]; tr.route = findRoute(h.tile, h.fwd ? h.path.b : h.path.a, tr.target.tile); } toast(`${tr.name} reversed`); };
 $('btnFollow').onclick = () => { game.follow = !game.follow; renderTrainList(); };
 $('btnSave').onclick = saveGame; $('btnLoad').onclick = loadGame;
-$('btnHelp').onclick = () => $('help').style.display = 'flex'; $('btnStart').onclick = () => $('help').style.display = 'none';
+$('btnHelp').onclick = () => $('help').style.display = 'flex';
+$('btnStart').onclick = () => { $('help').style.display = 'none'; if (document.body.classList.contains('touch')) toast('Two fingers: drag to move, pinch to zoom'); };
 $('autoRoute').onchange = e => { game.autoRoute = e.target.checked; };
-function selectTrain(tr) { game.selected = tr; if (tr) { $('help').style.display = 'none'; } renderTrainList(); }
-function setTool(t) { game.tool = t; document.querySelectorAll('#tools .tb[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === t)); $('status').textContent = { select: 'Click switches to throw them, signals to toggle, trains to control.', track: 'Drag across the ground to lay track. Click a piece to rotate it.', signal: 'Click near the end of a track piece to place a signal.', erase: 'Click track or a signal to remove it (half refund).' }[t]; canvas.style.cursor = t === 'track' ? 'cell' : t === 'erase' ? 'not-allowed' : 'pointer'; drawPath = null; clearGhosts(); }
+function selectTrain(tr) { game.selected = tr; if (tr) { $('help').style.display = 'none'; document.body.classList.add('panel-open'); $('panelToggle').classList.add('on'); } renderTrainList(); }
+function setTool(t) { game.tool = t; document.querySelectorAll('#tools .tb[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === t)); $('status').textContent = { select: 'Tap switches, signals and trains.', track: 'Drag to lay track, tap to rotate.', signal: 'Tap near the end of a track piece.', erase: 'Tap track or a signal to remove it.' }[t]; canvas.style.cursor = t === 'track' ? 'cell' : t === 'erase' ? 'not-allowed' : 'pointer'; drawPath = null; clearGhosts(); }
 document.querySelectorAll('#tools .tb[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
 
 // ---------- input ----------
@@ -872,28 +898,70 @@ function pick(ev) {
   const hg = raycaster.intersectObject(ground); if (hg.length) { const p = hg[0].point; const t = tileAt(Math.floor(p.x / T), Math.floor(p.z / T)); if (t) { res.tile = t; res.local = new THREE.Vector3(p.x - t.x * T - 2, 0, p.z - t.z * T - 2); } }
   return res;
 }
-let drag = null, drawPath = null;
+let drag = null, drawPath = null, pinch = null, suppressClick = false;
+const pointers = new Map();
+function panCamera(dx, dy) {
+  // world units per pixel at the target plane, so the ground tracks the finger on any screen
+  const upp = 2 * cam.dist * Math.tan(camera.fov * Math.PI / 360) / Math.max(1, renderer.domElement.clientHeight);
+  const side = dx * upp, fwd = dy * upp / Math.max(0.35, Math.sin(cam.pitch));  // shallow angles cover more ground
+  const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw), rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw);
+  cam.target.x = clamp(cam.target.x + (-rx * side + fx * fwd), -10, MAPW * T + 10);
+  cam.target.z = clamp(cam.target.z + (-rz * side + fz * fwd), -10, MAPH * T + 10);
+  game.follow = false;
+}
+function zoomBy(f) { cam.dist = clamp(cam.dist * f, 12, 170); }
+function pinchState() { const [a, b] = [...pointers.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 }; }
+function cancelDraw() { if (drawPath) { drawPath = null; clearGhosts(); setTool(game.tool); } }
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 canvas.addEventListener('pointerdown', ev => {
-  canvas.setPointerCapture(ev.pointerId); $('help').style.display = 'none';
+  canvas.setPointerCapture(ev.pointerId);
+  pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+  $('help').style.display = 'none';
+  if (pointers.size === 2) { cancelDraw(); drag = null; suppressClick = true; pinch = pinchState(); return; }
+  if (pointers.size > 2) return;
   drag = { x: ev.clientX, y: ev.clientY, sx: ev.clientX, sy: ev.clientY, button: ev.button, moved: false, pan: ev.button === 2 || ev.button === 1 || ev.shiftKey };
   if (ev.button === 0 && !ev.shiftKey && game.tool === 'track') { const p = pick(ev); if (p.tile) { drawPath = [p.tile]; drag = null; showPathGhost(); } }
 });
 canvas.addEventListener('pointermove', ev => {
+  const pt = pointers.get(ev.pointerId); if (pt) { pt.x = ev.clientX; pt.y = ev.clientY; }
+  if (pointers.size >= 2) {
+    if (pointers.size === 2) {
+      const n = pinchState();
+      if (pinch) { if (n.d > 0 && pinch.d > 0) zoomBy(pinch.d / n.d); panCamera(n.cx - pinch.cx, n.cy - pinch.cy); }
+      pinch = n;
+    }
+    return;
+  }
   if (drawPath) { const p = pick(ev); if (p.tile && p.tile !== drawPath[drawPath.length - 1]) { extendPath(p.tile); showPathGhost(); } return; }
   if (drag) {
-    const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y; drag.x = ev.clientX; drag.y = ev.clientY; if (Math.abs(ev.clientX - drag.sx) + Math.abs(ev.clientY - drag.sy) > 4) drag.moved = true;
-    if (drag.pan) { const s = cam.dist * 0.0016; const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw), rx = Math.cos(cam.yaw), rz = -Math.sin(cam.yaw); cam.target.x += (-rx * dx + fx * dy) * s; cam.target.z += (-rz * dx + fz * dy) * s; game.follow = false; }
+    const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y; drag.x = ev.clientX; drag.y = ev.clientY;
+    if (Math.abs(ev.clientX - drag.sx) + Math.abs(ev.clientY - drag.sy) > (ev.pointerType === 'touch' ? 10 : 4)) drag.moved = true;
+    if (drag.pan) panCamera(dx, dy);
     else { cam.yaw -= dx * 0.006; cam.pitch = clamp(cam.pitch + dy * 0.005, 0.2, 1.45); }
     return;
   }
-  const p = pick(ev); hoverTile(p);
+  if (ev.pointerType !== 'touch') hoverTile(pick(ev));
 });
-canvas.addEventListener('pointerup', ev => {
-  if (drawPath) { commitPath(); drawPath = null; clearGhosts(); return; }
-  if (!drag) return; const wasClick = !drag.moved && drag.button === 0 && !drag.pan; drag = null; if (wasClick) click(ev);
-});
-canvas.addEventListener('wheel', ev => { cam.dist = clamp(cam.dist * (1 + Math.sign(ev.deltaY) * 0.1), 12, 170); ev.preventDefault(); }, { passive: false });
+function endPointer(ev) {
+  if (!pointers.delete(ev.pointerId)) return;
+  if (pointers.size < 2) pinch = null;
+  if (pointers.size > 0) { drag = null; cancelDraw(); return; }   // lifting one of two: don't jump
+  if (drawPath) { commitPath(); drawPath = null; clearGhosts(); suppressClick = false; return; }
+  const d = drag, sc = suppressClick; drag = null; suppressClick = false;
+  if (d && !d.moved && d.button === 0 && !d.pan && !sc) click(ev);
+}
+canvas.addEventListener('pointerup', endPointer);
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('wheel', ev => { zoomBy(1 + Math.sign(ev.deltaY) * 0.1); ev.preventDefault(); }, { passive: false });
+if (matchMedia('(pointer: coarse)').matches) document.body.classList.add('touch');
+function holdRepeat(btn, fn) {
+  let t = null, iv = null;
+  btn.addEventListener('pointerdown', ev => { ev.preventDefault(); fn(); t = setTimeout(() => { iv = setInterval(fn, 70); }, 300); });
+  for (const e of ['pointerup', 'pointercancel', 'pointerleave']) btn.addEventListener(e, () => { clearTimeout(t); clearInterval(iv); });
+}
+holdRepeat($('zoomIn'), () => zoomBy(1 / 1.1));
+holdRepeat($('zoomOut'), () => zoomBy(1.1));
+$('panelToggle').onclick = () => $('panelToggle').classList.toggle('on', document.body.classList.toggle('panel-open'));
 function hoverTile(p) {
   if (!hoverGhost) { hoverGhost = new THREE.Mesh(ghostGeo, MAT.ghostHover); hoverGhost.rotation.x = -Math.PI / 2; scene.add(hoverGhost); }
   hoverGhost.visible = !!p.tile && game.tool !== 'select';
@@ -965,7 +1033,7 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 // debug / modding hooks
-window.IslandRail = { cam, updateCamera, crash, placeSignal, rotateTile, game, trains, tiles, tileAt, PLACES, placeById, planFromPath, evaluatePlan, applyTrack, dispatch, toggleSignal, setSwitch, eraseTile, findRoute, lookahead };
+window.IslandRail = { cam, updateCamera, panCamera, zoomBy, pointers, crash, placeSignal, rotateTile, game, trains, tiles, tileAt, PLACES, placeById, planFromPath, evaluatePlan, applyTrack, dispatch, toggleSignal, setSwitch, eraseTile, findRoute, lookahead };
 </script>
 </body>
 </html>
