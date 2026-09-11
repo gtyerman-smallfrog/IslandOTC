@@ -149,8 +149,10 @@
     <h2>Your job</h2>
     <ul>
       <li>Three trains are waiting in the <b>holding yard</b> next to <b>Central Station</b>.</li>
-      <li>Lay track from the station to the <b>Harbour</b>, the <b>Quarry</b> and <b>Hilltown</b>. Every delivery between places pays out.</li>
+      <li>Lay track from the station to the <b>Harbour</b>, the <b>Quarry</b>, <b>Hilltown</b> and the <b>Airport</b>. Every delivery between places pays out.</li>
+      <li>The island is far bigger than the city that sits on it. There is room on every side to build out as you grow.</li>
       <li>Track that crosses a <b>road</b> becomes a level crossing with boom gates. Track through a <b>hill</b> becomes a tunnel (they cost more!).</li>
+      <li>The streets have their own <b>traffic lights</b>. Cars queue at red, brake lights and all, and pull away on green.</li>
       <li>Trains obey the <b>track controls</b>: they stop at red signals, follow the switches as they are set, wait for trains ahead and slow for curves. Two trains on the same tile is a crash.</li>
     </ul>
     <h2>Controls</h2>
@@ -176,7 +178,7 @@ if (typeof THREE === 'undefined') { document.getElementById('help').innerHTML = 
 
 // ---------- constants & helpers ----------
 const T = 4;                 // tile size in world units
-const MAPW = 28, MAPH = 28;  // tiles
+const MAPW = 168, MAPH = 168;  // tiles — 6x the old 28, with landmarks only spread 2x, leaving room for the city to grow
 const DX = [0, 1, 0, -1], DZ = [-1, 0, 1, 0];       // N E S W
 const DN = ['N', 'E', 'S', 'W'];
 const OPP = d => (d + 2) & 3;
@@ -191,9 +193,9 @@ const fmtMoney = n => (n < 0 ? '-$' : '$') + Math.abs(Math.round(n)).toLocaleStr
 
 const COST = { straight: 100, curve: 120, switch: 80, diamond: 150, tunnel: 250, crossing: 300, signal: 60 };
 const MAXV = 7.5, CURVEV = 4.2, SWITCHV = 5.5, ACC = 2.6, DECEL = 3.6;
-const CAR_SPACING = 3.7, HILL_H = 7;
+const CAR_SPACING = 3.7, HILL_H = 9;
 
-const game = { money: 5000, deliveries: 0, served: new Set(), autoRoute: true, tool: 'select', selected: null, follow: false, time: 0 };
+const game = { money: 12000, deliveries: 0, served: new Set(), autoRoute: true, tool: 'select', selected: null, follow: false, time: 0 };
 
 // ---------- three.js setup ----------
 const canvas = document.getElementById('c');
@@ -203,9 +205,9 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xbfe0f7);
-scene.fog = new THREE.Fog(0xbfe0f7, 140, 260);
-const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 600);
-const cam = { target: new THREE.Vector3(30, 0, 62), yaw: 0.55, pitch: 0.85, dist: 58 };
+scene.fog = new THREE.Fog(0xbfe0f7, 320, 1100);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 2600);
+const cam = { target: new THREE.Vector3(276, 0, 344), yaw: 0.55, pitch: 0.85, dist: 78 };
 function updateCamera() {
   const cp = Math.cos(cam.pitch);
   camera.position.set(cam.target.x + cam.dist * cp * Math.sin(cam.yaw), cam.target.y + cam.dist * Math.sin(cam.pitch), cam.target.z + cam.dist * cp * Math.cos(cam.yaw));
@@ -218,9 +220,11 @@ scene.add(new THREE.HemisphereLight(0xdfefff, 0x5a7a45, 0.5));
 const sun = new THREE.DirectionalLight(0xfff2dc, 0.85);
 sun.position.set(70, 110, 40); sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-Object.assign(sun.shadow.camera, { left: -80, right: 80, top: 80, bottom: -80, near: 10, far: 300 });
+Object.assign(sun.shadow.camera, { left: -130, right: 130, top: 130, bottom: -130, near: 10, far: 420 });
 sun.shadow.bias = -0.0008;
-sun.target.position.set(56, 0, 56); scene.add(sun, sun.target);
+sun.target.position.set(276, 0, 344); scene.add(sun, sun.target);
+// the sun rig follows the camera so shadows stay crisp across a big island
+function updateSun() { sun.position.set(cam.target.x + 80, 150, cam.target.z + 50); sun.target.position.set(cam.target.x, 0, cam.target.z); sun.target.updateMatrixWorld(); }
 
 const MAT = {
   ballast: new THREE.MeshLambertMaterial({ color: 0x9a917f, side: THREE.DoubleSide }),
@@ -242,7 +246,45 @@ const MAT = {
   ghostOk: new THREE.MeshBasicMaterial({ color: 0x5ad17a, transparent: true, opacity: 0.45, depthWrite: false }),
   ghostBad: new THREE.MeshBasicMaterial({ color: 0xff5252, transparent: true, opacity: 0.45, depthWrite: false }),
   ghostHover: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.25, depthWrite: false }),
+  painted: new THREE.MeshLambertMaterial({ vertexColors: true }),        // merged, per-vertex-coloured props
+  glass: new THREE.MeshLambertMaterial({ color: 0x9fd0e8, transparent: true, opacity: 0.75 }),
+  runway: new THREE.MeshLambertMaterial({ color: 0x33363c }),
+  markings: new THREE.MeshLambertMaterial({ color: 0xe9e6d8 }),
 };
+// merge boxes/cylinders into ONE geometry with baked vertex colours: a detailed car stays a single draw call
+function mergeParts(parts) {
+  let total = 0;
+  const prep = parts.map(q => {
+    let g = q.geo.clone(); if (g.index) g = g.toNonIndexed();
+    const m = new THREE.Matrix4().compose(new THREE.Vector3(q.p[0], q.p[1], q.p[2]),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(q.r ? q.r[0] : 0, q.r ? q.r[1] : 0, q.r ? q.r[2] : 0)),
+      new THREE.Vector3(1, 1, 1));
+    g.applyMatrix4(m);
+    const n = g.attributes.position.count; total += n;
+    return { g, n, c: new THREE.Color(q.c), tag: q.tag };
+  });
+  const pos = new Float32Array(total * 3), nor = new Float32Array(total * 3), col = new Float32Array(total * 3);
+  const ranges = {}; let o = 0;
+  for (const q of prep) {
+    pos.set(q.g.attributes.position.array, o * 3);
+    nor.set(q.g.attributes.normal.array, o * 3);
+    for (let i = 0; i < q.n; i++) { col[(o + i) * 3] = q.c.r; col[(o + i) * 3 + 1] = q.c.g; col[(o + i) * 3 + 2] = q.c.b; }
+    if (q.tag) (ranges[q.tag] = ranges[q.tag] || []).push([o, q.n]);
+    o += q.n; q.g.dispose();
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.userData.ranges = ranges;
+  return g;
+}
+function paintRange(mesh, tag, hex) {
+  const r = mesh.geometry.userData.ranges[tag]; if (!r) return;
+  const col = mesh.geometry.attributes.color, c = new THREE.Color(hex);
+  for (const [o, n] of r) for (let i = 0; i < n; i++) col.setXYZ(o + i, c.r, c.g, c.b);
+  col.needsUpdate = true;
+}
 
 // ---------- path geometry (tile-local curves) ----------
 class ArcCurve extends THREE.Curve {
@@ -277,24 +319,54 @@ const tileAt = (x, z) => (x < 0 || z < 0 || x >= MAPW || z >= MAPH) ? null : til
 const tileCenter = t => new THREE.Vector3(t.x * T + 2, 0, t.z * T + 2);
 function forRect(r, fn) { for (let z = r[1]; z <= r[3]; z++) for (let x = r[0]; x <= r[2]; x++) fn(tiles[z][x]); }
 
-const HILLS = [[0, 7, 13, 8], [9, 5, 12, 6], [11, 16, 14, 19], [6, 23, 10, 26], [20, 1, 25, 3]];
-const WATER = [[21, 12, 25, 15]];
+const HILLS = [
+  [54, 64, 84, 70],     // ridge between Central and Hilltown — the classic tunnel
+  [96, 58, 108, 70],    // eastern hill, in the way of the airport run
+  [76, 102, 86, 110],   // southern hill above the quarry
+  [42, 82, 52, 96],     // western bluff
+  [98, 40, 118, 48],    // far northern range
+  [128, 88, 146, 100],  // south-eastern range
+];
+const WATER = [[92, 78, 112, 92]];
 HILLS.forEach(r => forRect(r, t => t.terrain = 'hill'));
 WATER.forEach(r => forRect(r, t => t.terrain = 'water'));
-const ROAD_X = 16, ROAD_Z = 21;
-for (let z = 0; z < MAPH; z++) { const t = tiles[z][ROAD_X]; t.terrain = 'road'; t.roadAxis = 0; }
-for (let x = 0; x < MAPW; x++) { const t = tiles[ROAD_Z][x]; t.terrain = 'road'; t.roadAxis = (x === ROAD_X) ? 2 : 1; }
+
+// road network: two streets each way, meeting at four signalled intersections
+const ROADS = [
+  { axis: 0, line: 88 }, { axis: 0, line: 114 },   // axis 0 runs north-south, at constant x
+  { axis: 1, line: 74 }, { axis: 1, line: 98 },    // axis 1 runs east-west, at constant z
+];
+ROADS.forEach((r, i) => {
+  r.id = i; r.c = r.line * T + 2; r.L = (r.axis === 0 ? MAPH : MAPW) * T; r.crossings = [];
+  const n = r.axis === 0 ? MAPH : MAPW;
+  for (let k = 0; k < n; k++) {
+    const t = r.axis === 0 ? tileAt(r.line, k) : tileAt(k, r.line);
+    t.terrain = 'road';
+    if (t.roadIdx === undefined) { t.roadIdx = i; t.roadAxis = r.axis; }
+    else { t.roadAxis = 2; t.junction = true; }    // where two streets meet: no rail allowed
+  }
+});
+// light cycle per intersection: 0 = north-south green, 1 = its amber, 2 = east-west green, 3 = its amber
+const INTERSECTIONS = [];
+for (const a of ROADS) if (a.axis === 0) for (const b of ROADS) if (b.axis === 1)
+  INTERSECTIONS.push({ tx: a.line, tz: b.line, x: a.line * T + 2, z: b.line * T + 2, phase: ((a.line + b.line) / 2) % 2 ? 2 : 0, t: 0, lamps: [] });
+const GREEN_T = 9, AMBER_T = 2.2;
+const lightGreen = (it, axis) => it.phase === (axis === 0 ? 0 : 2);
+const lightAmber = (it, axis) => it.phase === (axis === 0 ? 1 : 3);
+function intersectionAt(tx, tz) { return INTERSECTIONS.find(i => i.tx === tx && i.tz === tz); }
 
 const PLACES = [
-  { id: 'central', name: 'Central Station', stop: [6, 14], icon: '🏛️' },
-  { id: 'harbour', name: 'Harbour', stop: [22, 16], icon: '⚓' },
-  { id: 'quarry', name: 'Quarry', stop: [20, 25], icon: '⛏️' },
-  { id: 'hilltown', name: 'Hilltown', stop: [4, 3], icon: '🏘️' },
-  { id: 'yard1', name: 'Yard Road 1', stop: [7, 17], yard: true, icon: '🏗️' },
-  { id: 'yard2', name: 'Yard Road 2', stop: [7, 18], yard: true, icon: '🏗️' },
-  { id: 'yard3', name: 'Yard Road 3', stop: [7, 19], yard: true, icon: '🏗️' },
+  { id: 'central', name: 'Central Station', stop: [68, 84], icon: '🏛️' },
+  { id: 'harbour', name: 'Harbour', stop: [100, 94], icon: '⚓' },
+  { id: 'quarry', name: 'Quarry', stop: [96, 108], icon: '⛏️' },
+  { id: 'hilltown', name: 'Hilltown', stop: [64, 60], icon: '🏘️' },
+  { id: 'airport', name: 'Airport', stop: [122, 68], icon: '✈️' },
+  { id: 'yard1', name: 'Yard Road 1', stop: [70, 90], yard: true, icon: '🏗️' },
+  { id: 'yard2', name: 'Yard Road 2', stop: [70, 92], yard: true, icon: '🏗️' },
+  { id: 'yard3', name: 'Yard Road 3', stop: [70, 94], yard: true, icon: '🏗️' },
 ];
 const placeById = id => PLACES.find(p => p.id === id);
+const DESTINATIONS = ['harbour', 'quarry', 'hilltown', 'airport'];
 PLACES.forEach(p => { p.tile = tileAt(p.stop[0], p.stop[1]); p.tile.place = p; });
 
 // pre-laid track
@@ -304,59 +376,110 @@ function recomputeSwitch(t) {
   t.sw = null;
 }
 const N = 0, E = 1, S = 2, Wn = 3;
-lay(3, 14, E, S, true);
-for (let x = 4; x <= 9; x++) lay(x, 14, E, Wn, x >= 5 && x <= 8);
-lay(3, 15, N, S, true); lay(3, 16, N, S, true);
-lay(3, 17, N, S, true); lay(3, 17, N, E, true);
-lay(3, 18, N, S, true); lay(3, 18, N, E, true);
-lay(3, 19, N, E, true);
-for (let z = 17; z <= 19; z++) for (let x = 4; x <= 7; x++) lay(x, z, E, Wn, true);
-for (let x = 21; x <= 23; x++) lay(x, 16, E, Wn, x === 22);
-for (let x = 19; x <= 21; x++) lay(x, 25, E, Wn, x === 20);
-for (let x = 3; x <= 5; x++) lay(x, 3, E, Wn, x === 4);
-tileAt(3, 15).signals[N] = { state: 'red' };  // yard exit signal
+// Central Station: a long through platform road
+lay(58, 84, E, S, true);
+for (let x = 59; x <= 80; x++) lay(x, 84, E, Wn, x >= 60 && x <= 78);
+// down the neck into the holding yard
+for (let z = 85; z <= 89; z++) lay(58, z, N, S, true);
+lay(58, 90, N, S, true); lay(58, 90, N, E, true);
+lay(58, 91, N, S, true);
+lay(58, 92, N, S, true); lay(58, 92, N, E, true);
+lay(58, 93, N, S, true);
+lay(58, 94, N, E, true);
+for (const z of [90, 92, 94]) for (let x = 59; x <= 76; x++) lay(x, z, E, Wn, true);
+// destination stubs, waiting to be connected
+for (let x = 97; x <= 103; x++) lay(x, 94, E, Wn, x >= 99 && x <= 101);     // harbour
+for (let x = 93; x <= 99; x++) lay(x, 108, E, Wn, x >= 95 && x <= 97);      // quarry
+for (let x = 61; x <= 67; x++) lay(x, 60, E, Wn, x >= 63 && x <= 65);       // hilltown
+for (let x = 119; x <= 125; x++) lay(x, 68, E, Wn, x >= 121 && x <= 123);   // airport
+tileAt(58, 85).signals[N] = { state: 'red' };   // yard exit signal
 
-// building footprints
-const BLOCKS = [[4, 13, 9, 13], [5, 12, 7, 12], [1, 18, 1, 18], [21, 17, 23, 17], [24, 16, 24, 17], [18, 26, 22, 26], [22, 25, 22, 25], [2, 2, 2, 2], [4, 2, 4, 2], [6, 2, 6, 2], [3, 1, 3, 1], [5, 1, 5, 1]];
-BLOCKS.forEach(r => forRect(r, t => t.terrain = 'block'));
+// building footprints — track cannot be laid through these
+const BLOCKS = [
+  [64, 82, 76, 82], [66, 81, 72, 81],                       // Central Station buildings
+  [50, 90, 52, 92],                                          // yard offices
+  [96, 95, 108, 96], [110, 93, 111, 95],                     // harbour sheds
+  [92, 110, 104, 112],                                        // quarry works
+  [58, 54, 62, 57], [64, 54, 70, 56], [59, 52, 60, 52], [66, 52, 68, 52],  // Hilltown
+  [128, 69, 143, 72], [126, 70, 127, 71],                    // airport terminal + tower
+  [84, 78, 87, 79], [90, 82, 91, 83], [84, 88, 87, 89],      // city blocks near Central
+];
+BLOCKS.forEach(r => forRect(r, t => { if (t.terrain === 'grass') t.terrain = 'block'; }));
+// airport pavement: runway, taxiway, link and apron
+const PAVED = [[126, 59, 156, 62], [128, 66, 154, 67], [125, 60, 129, 67], [127, 70, 145, 73]];
+PAVED.forEach(r => forRect(r, t => { if (t.terrain === 'grass') t.terrain = 'block'; }));
 
 // ---------- terrain mesh ----------
+// Signed distance to the hills as a tile-grid chamfer transform: O(tiles). The old
+// per-vertex nearest-rectangle search would be ~25M operations on a map this size.
+const SD = (() => {
+  const W = MAPW, H = MAPH, INF = 1e9;
+  const din = new Float32Array(W * H).fill(INF), dout = new Float32Array(W * H).fill(INF);
+  for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) { const i = z * W + x; if (tiles[z][x].terrain === 'hill') dout[i] = 0; else din[i] = 0; }
+  const Q = Math.SQRT2;
+  const pass = d => {
+    for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) {
+      const i = z * W + x; let v = d[i];
+      if (x > 0) v = Math.min(v, d[i - 1] + 1);
+      if (z > 0) v = Math.min(v, d[i - W] + 1);
+      if (x > 0 && z > 0) v = Math.min(v, d[i - W - 1] + Q);
+      if (x < W - 1 && z > 0) v = Math.min(v, d[i - W + 1] + Q);
+      d[i] = v;
+    }
+    for (let z = H - 1; z >= 0; z--) for (let x = W - 1; x >= 0; x--) {
+      const i = z * W + x; let v = d[i];
+      if (x < W - 1) v = Math.min(v, d[i + 1] + 1);
+      if (z < H - 1) v = Math.min(v, d[i + W] + 1);
+      if (x < W - 1 && z < H - 1) v = Math.min(v, d[i + W + 1] + Q);
+      if (x > 0 && z < H - 1) v = Math.min(v, d[i + W - 1] + Q);
+      d[i] = v;
+    }
+  };
+  pass(din); pass(dout);
+  const sd = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) sd[i] = dout[i] === 0 ? din[i] : -dout[i];
+  return sd;
+})();
+function sampleSD(vx, vz) {
+  const fx = clamp(vx / T - 0.5, 0, MAPW - 1.001), fz = clamp(vz / T - 0.5, 0, MAPH - 1.001);
+  const x0 = Math.floor(fx), z0 = Math.floor(fz), tx = fx - x0, tz = fz - z0;
+  const a = SD[z0 * MAPW + x0], b = SD[z0 * MAPW + x0 + 1], c = SD[(z0 + 1) * MAPW + x0], d = SD[(z0 + 1) * MAPW + x0 + 1];
+  return lerp(lerp(a, b, tx), lerp(c, d, tx), tz);
+}
 const ground = (() => {
-  const g = new THREE.PlaneGeometry(MAPW * T, MAPH * T, MAPW * 3, MAPH * 3);
+  const g = new THREE.PlaneGeometry(MAPW * T, MAPH * T, MAPW, MAPH);
   g.rotateX(-Math.PI / 2); g.translate(MAPW * T / 2, 0, MAPH * T / 2);
   const pos = g.attributes.position, n = pos.count;
   g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
   const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true }));
   m.receiveShadow = true; m.castShadow = true;
-  const hillTiles = [], openTiles = [];
-  for (const row of tiles) for (const t of row) (t.terrain === 'hill' ? hillTiles : openTiles).push(t);
-  const rectDist = (px, pz, t) => { const x0 = t.x * T, z0 = t.z * T; const dx = Math.max(x0 - px, 0, px - x0 - T), dz = Math.max(z0 - pz, 0, pz - z0 - T); return Math.hypot(dx, dz) / T; };
-  m.userData.vd = new Float32Array(n); m.userData.vt = []; m.userData.vr = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const vx = pos.getX(i), vz = pos.getZ(i);
-    let dh = Infinity; for (const t of hillTiles) { const d = rectDist(vx, vz, t); if (d < dh) dh = d; if (dh === 0) break; }
-    let d; if (dh === 0) { let dn = Infinity; for (const t of openTiles) { const q = rectDist(vx, vz, t); if (q < dn) dn = q; } d = dn; } else d = -dh;
-    m.userData.vd[i] = d;
-    const xs = new Set([Math.floor((vx - 0.01) / T), Math.floor((vx + 0.01) / T)]), zs = new Set([Math.floor((vz - 0.01) / T), Math.floor((vz + 0.01) / T)]);
-    const tt = []; for (const x of xs) for (const z of zs) { const t = tileAt(x, z); if (t) tt.push(t); }
-    m.userData.vt.push(tt); m.userData.vr[i] = rnd();
-  }
+  const vd = new Float32Array(n), vr = new Float32Array(n);
+  for (let i = 0; i < n; i++) { vd[i] = sampleSD(pos.getX(i), pos.getZ(i)); vr[i] = rnd(); }
+  m.userData.vd = vd; m.userData.vr = vr;
   scene.add(m); return m;
 })();
 const cGrass = new THREE.Color(0x62a742), cGrass2 = new THREE.Color(0x7fbf52), cHill = new THREE.Color(0x4e8a3c), cDirt = new THREE.Color(0x9a8a62), cRock = new THREE.Color(0x8d897d), cSand = new THREE.Color(0xc4b384);
 function updateTerrain() {
-  const g = ground.geometry, pos = g.attributes.position, col = g.attributes.color, { vd, vt, vr } = ground.userData; const c = new THREE.Color();
+  const g = ground.geometry, pos = g.attributes.position, col = g.attributes.color, { vd, vr } = ground.userData;
+  const c = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
-    const d = vd[i]; let h = HILL_H * smoothstep(-0.6, 0.55, d);
-    let flat = false, allWater = true;
-    for (const t of vt[i]) { if (t.terrain !== 'water') allWater = false; if (t.terrain !== 'hill' && (t.paths.length || t.terrain === 'road' || t.terrain === 'water' || t.terrain === 'block')) flat = true; }
-    if (flat) h = 0;
     const vx = pos.getX(i), vz = pos.getZ(i);
-    if (h > 0.3) h += 0.45 * Math.sin(vx * 0.9 + vz * 0.4) * Math.cos(vz * 0.7 - vx * 0.3) * clamp(h / 3, 0, 1);
+    let h = HILL_H * (0.72 * smoothstep(-2.4, 2.6, vd[i]) + 0.28 * clamp(vd[i] / 9, 0, 1));
+    let flat = false, allWater = true, any = false;
+    const x0 = Math.floor((vx - 0.01) / T), x1 = Math.floor((vx + 0.01) / T);
+    const z0 = Math.floor((vz - 0.01) / T), z1 = Math.floor((vz + 0.01) / T);
+    for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) {
+      const t = tileAt(x, z); if (!t) continue; any = true;
+      if (t.terrain !== 'water') allWater = false;
+      if (t.terrain !== 'hill' && (t.paths.length || t.terrain === 'road' || t.terrain === 'water' || t.terrain === 'block')) flat = true;
+    }
+    if (!any) allWater = false;
+    if (flat) h = 0;
+    if (h > 0.3) h += 0.7 * Math.sin(vx * 0.33 + vz * 0.16) * Math.cos(vz * 0.27 - vx * 0.12) * clamp(h / 3, 0, 1);
     if (allWater) h = -0.7;
     pos.setY(i, h);
     c.copy(cGrass).lerp(cGrass2, vr[i]);
-    if (h > 0) c.lerp(cHill, clamp(h / 2.5, 0, 1)); if (h > 2.5) c.lerp(cDirt, clamp((h - 2.5) / 3.5, 0, 0.85)); if (h > 5.5) c.lerp(cRock, clamp((h - 5.5) / 2.5, 0, 0.7));
+    if (h > 0) c.lerp(cHill, clamp(h / 4, 0, 1)); if (h > 5) c.lerp(cDirt, clamp((h - 5) / 5, 0, 0.55)); if (h > 9) c.lerp(cRock, clamp((h - 9) / 2, 0, 0.55));
     if (allWater) c.copy(cSand);
     col.setXYZ(i, c.r, c.g, c.b);
   }
@@ -371,63 +494,236 @@ function makeLabel(text, color = '#ffffff') {
   ctx.font = 'bold 60px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.lineWidth = 10; ctx.strokeStyle = 'rgba(0,0,0,0.75)'; ctx.strokeText(text, 256, 64); ctx.fillStyle = color; ctx.fillText(text, 256, 64);
   const tex = new THREE.CanvasTexture(cv);
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false })); s.scale.set(14, 3.5, 1); return s;
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false })); sp.scale.set(16, 4, 1); return sp;
 }
-function label(text, x, y, z) { const s = makeLabel(text); s.position.set(x, y, z); staticGroup.add(s); }
-// roads
-for (const row of tiles) for (const t of row) if (t.terrain === 'road') {
-  const c = tileCenter(t);
-  const a = new THREE.Mesh(new THREE.PlaneGeometry(T, T), MAT.asphalt); a.rotation.x = -Math.PI / 2; a.position.set(c.x, 0.03, c.z); a.receiveShadow = true; staticGroup.add(a);
-  if (t.roadAxis !== 2) for (const o of [-1.2, 1.2]) { const d = new THREE.Mesh(new THREE.PlaneGeometry(t.roadAxis === 0 ? 0.14 : 1.2, t.roadAxis === 0 ? 1.2 : 0.14), MAT.dash); d.rotation.x = -Math.PI / 2; d.position.set(c.x + (t.roadAxis === 1 ? o : 0), 0.04, c.z + (t.roadAxis === 0 ? o : 0)); staticGroup.add(d); }
+function label(text, x, y, z) { const sp = makeLabel(text); sp.position.set(x, y, z); staticGroup.add(sp); }
+const flat = (w, d, mat, x, y, z, ry) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat); m.rotation.x = -Math.PI / 2; if (ry) m.rotation.z = ry; m.position.set(x, y, z); m.receiveShadow = true; staticGroup.add(m); return m; };
+
+// ---- roads: one long strip per street, dashes and stop lines instanced ----
+const dashGeo = new THREE.PlaneGeometry(1, 1); dashGeo.rotateX(-Math.PI / 2);
+{
+  const dashes = [], stops = [];
+  for (const r of ROADS) {
+    if (r.axis === 0) flat(T, r.L, MAT.asphalt, r.c, 0.03, r.L / 2);
+    else flat(r.L, T, MAT.asphalt, r.L / 2, 0.03, r.c);
+    const n = r.axis === 0 ? MAPH : MAPW;
+    for (let k = 0; k < n; k++) {
+      const t = r.axis === 0 ? tileAt(r.line, k) : tileAt(k, r.line);
+      if (t.junction) continue;
+      const cx = r.axis === 0 ? r.c : k * T + 2, cz = r.axis === 0 ? k * T + 2 : r.c;
+      dashes.push([cx, cz, r.axis, 1.6, 0.14]);      // centre line
+    }
+  }
+  for (const it of INTERSECTIONS) for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+    stops.push([it.x + dx * 2.6, it.z + dz * 2.6, dx ? 0 : 1]);
+  }
+  const mk = (list, mat, w, d) => {
+    const im = new THREE.InstancedMesh(dashGeo, mat, list.length); const m4 = new THREE.Matrix4();
+    list.forEach((e, i) => {
+      const [cx, cz, axis, len, wid] = e.length > 3 ? e : [e[0], e[1], e[2], d, w];
+      const sx = axis === 0 ? wid : len, sz = axis === 0 ? len : wid;
+      m4.makeScale(sx, 1, sz); m4.setPosition(cx, 0.05, cz); im.setMatrixAt(i, m4);
+    });
+    im.receiveShadow = true; staticGroup.add(im); return im;
+  };
+  mk(dashes, MAT.dash);
+  mk(stops.map(e => [e[0], e[1], e[2], 3.4, 0.4]), MAT.markings);
 }
-// water
-{ const r = WATER[0]; const w = new THREE.Mesh(new THREE.PlaneGeometry((r[2] - r[0] + 1) * T, (r[3] - r[1] + 1) * T), MAT.water); w.rotation.x = -Math.PI / 2; w.position.set((r[0] + r[2] + 1) * T / 2, -0.05, (r[1] + r[3] + 1) * T / 2); staticGroup.add(w); }
-// station
+// ---- traffic lights ----
+const tlHeadGeo = mergeParts([
+  { geo: new THREE.CylinderGeometry(0.13, 0.16, 4.2, 8), c: 0x2b2f36, p: [0, 2.1, 0] },
+  { geo: new THREE.BoxGeometry(0.2, 0.5, 0.2), c: 0x2b2f36, p: [0, 4.2, 0.45] },
+  { geo: new THREE.BoxGeometry(0.52, 1.5, 0.5), c: 0x1d2025, p: [0, 4.35, 0.85] },
+  { geo: new THREE.CylinderGeometry(0.34, 0.34, 0.22, 10), c: 0x9d9d97, p: [0, 0.11, 0] },
+]);
+const lampGeo = new THREE.SphereGeometry(0.16, 10, 10);
+for (const it of INTERSECTIONS) {
+  // one head per approach, on the near right of each
+  const approaches = [[0, -1, 0], [0, 1, 0], [-1, 0, 1], [1, 0, 1]];
+  for (const [dx, dz, axis] of approaches) {
+    const px = it.x + dx * 3.1 + (axis === 0 ? 2.9 : 0), pz = it.z + dz * 3.1 + (axis === 1 ? -2.9 : 0);
+    const g = new THREE.Group(); g.position.set(px, 0, pz);
+    g.rotation.y = Math.atan2(dx, dz);
+    const head = new THREE.Mesh(tlHeadGeo, MAT.painted); head.castShadow = true; g.add(head);
+    const mats = [];
+    for (let i = 0; i < 3; i++) {
+      const m = new THREE.MeshBasicMaterial({ color: 0x241010 });
+      const l = new THREE.Mesh(lampGeo, m); l.position.set(0, 4.85 - i * 0.5, 1.12); g.add(l); mats.push(m);
+    }
+    staticGroup.add(g);
+    it.lamps.push({ axis, mats });
+  }
+}
+// ---- water ----
+{ const r = WATER[0]; flat((r[2] - r[0] + 1) * T, (r[3] - r[1] + 1) * T, MAT.water, (r[0] + r[2] + 1) * T / 2, -0.05, (r[1] + r[3] + 1) * T / 2); }
+
+// ---- Central Station ----
 {
   const cream = new THREE.MeshLambertMaterial({ color: 0xe6d8b8 }), roof = new THREE.MeshLambertMaterial({ color: 0x8a3b2e }), plat = new THREE.MeshLambertMaterial({ color: 0xb8b2a3 });
-  box(24, 0.7, 3.2, plat, 7 * T, 0.35, 13 * T + 2.4);
-  box(11, 3.2, 3.6, cream, 6.5 * T, 1.6, 12 * T + 2);
-  const r = box(12, 1.2, 4.4, roof, 6.5 * T, 3.8, 12 * T + 2); r.scale.y = 1;
-  for (let x = 4; x <= 9; x++) { box(0.2, 3, 0.2, MAT.dark, x * T + 2, 1.5, 13 * T + 2.9); }
-  box(23.5, 0.15, 3.4, new THREE.MeshLambertMaterial({ color: 0x4f6d8f }), 7 * T, 3.1, 13 * T + 2.4);
-  label('Central Station', 7 * T, 8.5, 12 * T);
+  box(92, 0.7, 3.2, plat, 70 * T, 0.35, 83 * T + 2.4);
+  box(26, 4.2, 5.0, cream, 69 * T, 2.1, 82 * T + 2);
+  box(27, 1.3, 5.8, roof, 69 * T, 4.9, 82 * T + 2);
+  box(10, 3.6, 4.6, cream, 75 * T, 1.8, 82 * T + 2);
+  for (let x = 60; x <= 79; x += 2) box(0.22, 3.2, 0.22, MAT.dark, x * T + 2, 1.6, 83 * T + 2.9);
+  box(91, 0.16, 3.4, new THREE.MeshLambertMaterial({ color: 0x4f6d8f }), 70 * T, 3.3, 83 * T + 2.4);
+  label('Central Station', 69 * T, 10, 81 * T);
 }
-// yard office
-box(3, 2.2, 3, new THREE.MeshLambertMaterial({ color: 0x6f7c8a }), 1 * T + 2, 1.1, 18 * T + 2); label('Holding Yard', 6 * T, 6, 20 * T + 2);
-// harbour
+// ---- holding yard ----
+box(7, 3, 6, new THREE.MeshLambertMaterial({ color: 0x6f7c8a }), 51 * T, 1.5, 91 * T); label('Holding Yard', 64 * T, 7.5, 96 * T);
+// ---- harbour ----
 {
   const wh = new THREE.MeshLambertMaterial({ color: 0x9b4d3f }), steel = new THREE.MeshLambertMaterial({ color: 0xd8b13a });
-  box(11, 3.5, 3.4, wh, 22 * T + 2, 1.75, 17 * T + 2); box(11.4, 0.4, 3.8, MAT.dark, 22 * T + 2, 3.7, 17 * T + 2);
-  box(0.5, 9, 0.5, steel, 24 * T + 2, 4.5, 16 * T + 2); box(7, 0.4, 0.4, steel, 24 * T + 0.5, 9, 16 * T + 2); box(0.5, 9, 0.5, steel, 24 * T + 2, 4.5, 17 * T + 2);
-  box(0.08, 3.5, 0.08, MAT.dark, 22 * T + 2, 7.4, 16 * T + 2); box(0.9, 0.6, 0.6, MAT.dark, 22 * T + 2, 5.5, 16 * T + 2);
-  const boat = new THREE.Group(); boat.position.set(23 * T + 2, 0, 14 * T); box(6, 1.2, 2.4, new THREE.MeshLambertMaterial({ color: 0x2c4f7c }), 0, 0.5, 0, boat); box(2.2, 1.4, 1.8, MAT.white, -0.8, 1.7, 0, boat); box(0.4, 1.6, 0.4, MAT.red, 0.8, 2.2, 0, boat); staticGroup.add(boat);
-  label('Harbour', 22 * T + 2, 7.5, 16 * T + 2);
+  box(46, 5, 6, wh, 102 * T, 2.5, 95 * T + 2); box(47, 0.5, 6.6, MAT.dark, 102 * T, 5.3, 95 * T + 2);
+  for (const cx of [98, 106]) {
+    box(0.6, 13, 0.6, steel, cx * T, 6.5, 92 * T + 2); box(0.6, 13, 0.6, steel, cx * T, 6.5, 93 * T + 2);
+    box(9, 0.5, 0.5, steel, cx * T - 2, 13, 92.5 * T); box(0.1, 5, 0.1, MAT.dark, cx * T - 5, 10.4, 92.5 * T);
+    box(1.1, 0.7, 0.7, MAT.dark, cx * T - 5, 7.6, 92.5 * T);
+  }
+  const boat = new THREE.Group(); boat.position.set(102 * T, 0, 86 * T);
+  box(13, 2, 4.4, new THREE.MeshLambertMaterial({ color: 0x2c4f7c }), 0, 0.8, 0, boat);
+  box(4.4, 2.6, 3.4, MAT.white, -2, 3, 0, boat); box(0.7, 2.6, 0.7, MAT.red, 1.6, 3.6, 0, boat);
+  staticGroup.add(boat);
+  label('Harbour', 102 * T, 10, 93 * T);
 }
-// quarry
+// ---- quarry ----
 {
   const grey = new THREE.MeshLambertMaterial({ color: 0x8e8a7e });
-  for (let i = 0; i < 6; i++) { const m = new THREE.Mesh(new THREE.ConeGeometry(2 + rnd() * 1.5, 3 + rnd() * 3, 6), grey); m.position.set(18 * T + 3 + i * 3.4, 1.4, 26 * T + 2 + (rnd() - .5) * 2); m.castShadow = true; staticGroup.add(m); }
-  box(3, 5, 3.2, new THREE.MeshLambertMaterial({ color: 0x5d6b78 }), 22 * T + 2, 3.2, 25 * T + 2); box(1.2, 1.5, 1.2, MAT.dark, 22 * T + 2, 0.75, 25 * T + 2);
-  label('Quarry', 20 * T + 2, 7.5, 25 * T + 2);
+  for (let i = 0; i < 12; i++) { const m = new THREE.Mesh(new THREE.ConeGeometry(3 + rnd() * 2.4, 4 + rnd() * 5, 6), grey); m.position.set(92 * T + i * 4.6, 2, 110 * T + 2 + (rnd() - .5) * 9); m.castShadow = true; staticGroup.add(m); }
+  box(6, 9, 6, new THREE.MeshLambertMaterial({ color: 0x5d6b78 }), 94 * T + 2, 5.5, 111 * T + 2); box(2.4, 2.6, 2.4, MAT.dark, 94 * T + 2, 1.3, 111 * T + 2);
+  label('Quarry', 96 * T, 10, 110 * T);
 }
-// hilltown houses
+// ---- Hilltown ----
 {
-  const cols = [0xf2e6c9, 0xd9c9a8, 0xe9d3b3, 0xcfe0e8, 0xf0dccc], roofs = [0x8a3b2e, 0x555a63, 0x7a5a3a];
-  BLOCKS.slice(7).forEach((r, i) => { const t = tileAt(r[0], r[1]); const c = tileCenter(t); box(2.6, 2.2, 2.6, new THREE.MeshLambertMaterial({ color: cols[i % cols.length] }), c.x, 1.1, c.z); const rf = new THREE.Mesh(new THREE.ConeGeometry(2.2, 1.6, 4), new THREE.MeshLambertMaterial({ color: roofs[i % roofs.length] })); rf.position.set(c.x, 3.0, c.z); rf.rotation.y = Math.PI / 4; rf.castShadow = true; staticGroup.add(rf); });
-  label('Hilltown', 4 * T + 2, 7.5, 3 * T + 2);
+  const cols = [0xf2e6c9, 0xd9c9a8, 0xe9d3b3, 0xcfe0e8, 0xf0dccc, 0xe4d9c4], roofs = [0x8a3b2e, 0x555a63, 0x7a5a3a];
+  let i = 0;
+  for (const r of [[58, 54, 62, 57], [64, 54, 70, 56], [59, 52, 60, 52], [66, 52, 68, 52]])
+    for (let z = r[1]; z <= r[3]; z += 2) for (let x = r[0]; x <= r[2]; x += 2, i++) {
+      const cx = x * T + 2, cz = z * T + 2, h = 3 + (i % 3);
+      box(5, h, 5, new THREE.MeshLambertMaterial({ color: cols[i % cols.length] }), cx, h / 2, cz);
+      const rf = new THREE.Mesh(new THREE.ConeGeometry(4.2, 2.8, 4), new THREE.MeshLambertMaterial({ color: roofs[i % roofs.length] }));
+      rf.position.set(cx, h + 1.4, cz); rf.rotation.y = Math.PI / 4; rf.castShadow = true; staticGroup.add(rf);
+    }
+  label('Hilltown', 64 * T, 11, 56 * T);
 }
-// trees
-function makeTree(x, z) {
-  const g = new THREE.Group(); const s = 0.7 + rnd() * 0.7;
-  const tr = new THREE.Mesh(new THREE.CylinderGeometry(0.15 * s, 0.22 * s, 1.2 * s, 6), MAT.trunk); tr.position.y = 0.6 * s; tr.castShadow = true; g.add(tr);
-  const c1 = new THREE.Mesh(new THREE.ConeGeometry(1.1 * s, 2.2 * s, 7), rnd() > 0.5 ? MAT.leaf1 : MAT.leaf2); c1.position.y = 2.0 * s; c1.castShadow = true; g.add(c1);
-  const c2 = new THREE.Mesh(new THREE.ConeGeometry(0.8 * s, 1.6 * s, 7), MAT.leaf2); c2.position.y = 3.0 * s; c2.castShadow = true; g.add(c2);
-  g.position.set(x, 0, z); return g;
+// ---- airport ----
+const AIRPORT = { rwZ: 244, rwX0: 504, rwX1: 628, txZ: 268 };
+{
+  const A = AIRPORT;
+  flat(A.rwX1 - A.rwX0, 15, MAT.runway, (A.rwX0 + A.rwX1) / 2, 0.04, A.rwZ);              // runway
+  flat(A.rwX1 - A.rwX0 - 20, 7, MAT.runway, (A.rwX0 + A.rwX1) / 2, 0.04, A.txZ);          // taxiway
+  flat(16, 26, MAT.runway, A.rwX0 + 6, 0.04, (A.rwZ + A.txZ) / 2);                        // link
+  flat(70, 16, MAT.runway, 545, 0.04, 288);                                                // apron
+  for (let x = A.rwX0 + 12; x < A.rwX1 - 12; x += 12) flat(6, 0.7, MAT.markings, x, 0.06, A.rwZ);   // centreline
+  for (const end of [A.rwX0 + 4, A.rwX1 - 4]) for (let i = -3; i <= 3; i++) flat(7, 0.9, MAT.markings, end, 0.06, A.rwZ + i * 1.8);  // thresholds
+  const glassB = new THREE.MeshLambertMaterial({ color: 0x8fb8cf });
+  box(64, 8, 16, new THREE.MeshLambertMaterial({ color: 0xdfe3e6 }), 544, 4, 284);        // terminal
+  box(65, 0.6, 17, new THREE.MeshLambertMaterial({ color: 0x6e7681 }), 544, 8.3, 284);
+  box(62, 3.4, 0.5, glassB, 544, 3.4, 276.2);
+  box(5.5, 5.5, 5.5, new THREE.MeshLambertMaterial({ color: 0xc8ccd0 }), 508, 12, 282);   // control tower
+  box(6.5, 4, 6.5, glassB, 508, 16.5, 282);
+  box(7, 0.5, 7, MAT.dark, 508, 18.8, 282);
+  box(3.4, 24, 3.4, new THREE.MeshLambertMaterial({ color: 0xc8ccd0 }), 508, 12, 282);
+  // windsock
+  box(0.2, 6, 0.2, MAT.white, 496, 3, 252); const sock = new THREE.Mesh(new THREE.ConeGeometry(0.8, 3, 8), MAT.red); sock.position.set(497.6, 5.6, 252); sock.rotation.z = -Math.PI / 2; staticGroup.add(sock);
+  label('Airport', 545, 16, 268);
 }
-for (const row of tiles) for (const t of row) {
-  if (t.terrain !== 'grass' || t.paths.length || t.place) continue;
-  if ([[0, 12, 10, 20], [18, 15, 26, 18], [17, 24, 23, 27], [1, 0, 7, 4]].some(r => t.x >= r[0] && t.x <= r[2] && t.z >= r[1] && t.z <= r[3])) continue;
-  if (rnd() < 0.16) { const g = new THREE.Group(); const n = 1 + (rnd() < 0.4 ? 1 : 0); for (let i = 0; i < n; i++) g.add(makeTree(t.x * T + 0.8 + rnd() * 2.4, t.z * T + 0.8 + rnd() * 2.4)); t.tree = g; staticGroup.add(g); }
+function buildAirliner(livery) {
+  const F = new THREE.CylinderGeometry(1.5, 1.5, 22, 12); F.rotateZ(Math.PI / 2);
+  const nose = new THREE.SphereGeometry(1.5, 12, 10);
+  const eng = new THREE.CylinderGeometry(0.9, 0.9, 4, 10); eng.rotateZ(Math.PI / 2);
+  return mergeParts([
+    { geo: F, c: 0xf2f4f6, p: [0, 0, 0] },
+    { geo: nose, c: 0xf2f4f6, p: [11, 0, 0] },
+    { geo: new THREE.ConeGeometry(1.5, 5, 12), c: 0xf2f4f6, p: [-13, 0.6, 0], r: [0, 0, Math.PI / 2] },
+    { geo: new THREE.BoxGeometry(7, 0.4, 26), c: 0xe8eaec, p: [0.5, -0.3, 0] },          // main wing
+    { geo: new THREE.BoxGeometry(3.4, 0.3, 10), c: 0xe8eaec, p: [-11.5, 0.5, 0] },       // tailplane
+    { geo: new THREE.BoxGeometry(4.5, 6, 0.4), c: livery, p: [-12, 3.6, 0] },            // fin
+    { geo: new THREE.BoxGeometry(21, 0.9, 0.1), c: livery, p: [0, 0.5, 1.5] },           // cheatline
+    { geo: new THREE.BoxGeometry(21, 0.9, 0.1), c: livery, p: [0, 0.5, -1.5] },
+    { geo: eng, c: 0x55595e, p: [1.5, -1.6, 6] }, { geo: eng, c: 0x55595e, p: [1.5, -1.6, -6] },
+    { geo: new THREE.CylinderGeometry(0.25, 0.25, 2.2, 6), c: 0x33363c, p: [6, -1.6, 0] },
+  ]);
+}
+const parkedPlanes = [];
+{
+  const liveries = [0xd0342c, 0x2c6fd0, 0x2e8b57];
+  liveries.forEach((lv, i) => {
+    const m = new THREE.Mesh(buildAirliner(lv), MAT.painted); m.castShadow = true;
+    m.position.set(522 + i * 24, 2.6, 294); m.rotation.y = Math.PI / 2 + 0.35;
+    staticGroup.add(m); parkedPlanes.push(m);
+  });
+}
+// one airliner working the runway: taxi, roll, climb out, come back on approach
+const flight = { mesh: new THREE.Mesh(buildAirliner(0xf0a032), MAT.painted), state: 'taxi', t: 0, x: 520, z: AIRPORT.txZ, y: 2.6, v: 0, hdg: 0 };
+flight.mesh.castShadow = true; scene.add(flight.mesh);
+function updateFlight(dt) {
+  const A = AIRPORT, f = flight;
+  if (f.state === 'taxi') {
+    f.v = Math.min(9, f.v + 6 * dt); f.x -= f.v * dt; f.y = 2.6; f.hdg = -Math.PI / 2;
+    if (f.x <= A.rwX0 + 10) { f.x = A.rwX0 + 10; f.z = A.rwZ; f.state = 'line'; f.t = 0; f.v = 0; }
+  } else if (f.state === 'line') {
+    f.z = lerp(f.z, A.rwZ, 1 - Math.pow(0.02, dt)); f.hdg = Math.PI / 2; f.t += dt;
+    if (f.t > 2.5) { f.state = 'roll'; f.t = 0; }
+  } else if (f.state === 'roll') {
+    f.v += 13 * dt; f.x += f.v * dt; f.hdg = Math.PI / 2;
+    if (f.v > 42) f.state = 'climb';
+  } else if (f.state === 'climb') {
+    f.v = Math.min(70, f.v + 5 * dt); f.x += f.v * dt; f.y += 16 * dt; f.hdg = Math.PI / 2;
+    if (f.y > 120) { f.state = 'away'; f.t = 0; }
+  } else if (f.state === 'away') {
+    f.t += dt; f.x += 60 * dt; if (f.t > 4) { f.state = 'approach'; f.x = A.rwX1 + 320; f.y = 90; f.v = 55; f.hdg = -Math.PI / 2; }
+  } else if (f.state === 'approach') {
+    f.x -= f.v * dt; f.z = A.rwZ; f.y = Math.max(2.6, f.y - 12 * dt);
+    if (f.x <= A.rwX1 - 20 && f.y <= 3) { f.y = 2.6; f.state = 'brake'; }
+  } else if (f.state === 'brake') {
+    f.v = Math.max(0, f.v - 22 * dt); f.x -= f.v * dt; f.hdg = -Math.PI / 2;
+    if (f.v <= 0.2) { f.state = 'vacate'; f.t = 0; }
+  } else if (f.state === 'vacate') {
+    f.z = lerp(f.z, A.txZ, 1 - Math.pow(0.05, dt)); f.t += dt;
+    if (f.t > 3) { f.state = 'return'; f.v = 0; }
+  } else if (f.state === 'return') {
+    f.v = Math.min(9, f.v + 5 * dt); f.x += f.v * dt; f.hdg = Math.PI / 2;
+    if (f.x > 600) { f.x = 520; f.state = 'taxi'; f.v = 0; }
+  }
+  const climbing = f.state === 'climb' || f.state === 'away';
+  f.mesh.position.set(f.x, f.y, f.z);
+  f.mesh.rotation.set(0, f.hdg, climbing ? -0.22 : (f.state === 'approach' ? 0.06 : 0));
+}
+// ---- trees, instanced so thousands cost three draw calls ----
+const treeSlots = [];
+{
+  const spots = [];
+  const nearTrack = t => {
+    for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+      const n = tileAt(t.x + dx, t.z + dz); if (n && (n.paths.length || n.place)) return true;
+    }
+    return false;
+  };
+  for (const row of tiles) for (const t of row) {
+    if (t.terrain !== 'grass' || nearTrack(t)) continue;
+    if (rnd() < 0.075) spots.push(t);
+  }
+  const trunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 1.6, 6), coneGeo = new THREE.ConeGeometry(1.4, 2.8, 7);
+  const trunkIM = new THREE.InstancedMesh(trunkGeo, MAT.trunk, spots.length);
+  const c1IM = new THREE.InstancedMesh(coneGeo, MAT.leaf1, spots.length);
+  const c2IM = new THREE.InstancedMesh(coneGeo, MAT.leaf2, spots.length);
+  for (const im of [trunkIM, c1IM, c2IM]) { im.castShadow = true; im.receiveShadow = true; staticGroup.add(im); }
+  const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
+  spots.forEach((t, i) => {
+    const sc = 0.85 + rnd() * 0.9, x = t.x * T + 1 + rnd() * 2, z = t.z * T + 1 + rnd() * 2;
+    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rnd() * 6.28);
+    m4.compose(new THREE.Vector3(x, 0.8 * sc, z), q, new THREE.Vector3(sc, sc, sc)); trunkIM.setMatrixAt(i, m4);
+    m4.compose(new THREE.Vector3(x, 2.5 * sc, z), q, new THREE.Vector3(sc, sc, sc)); c1IM.setMatrixAt(i, m4);
+    m4.compose(new THREE.Vector3(x, 3.8 * sc, z), q, new THREE.Vector3(sc * 0.72, sc * 0.8, sc * 0.72)); c2IM.setMatrixAt(i, m4);
+    t.treeIdx = i;
+  });
+  treeSlots.push(trunkIM, c1IM, c2IM);
+}
+function clearTree(t) {
+  if (t.treeIdx === undefined) return;
+  const m4 = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (const im of treeSlots) { im.setMatrixAt(t.treeIdx, m4); im.instanceMatrix.needsUpdate = true; }
+  t.treeIdx = undefined;
 }
 
 // ---------- track meshes ----------
@@ -484,15 +780,28 @@ function rebuildTile(tile) {
   if (!tile.paths.length) { tile.group = null; return; }
   const g = new THREE.Group(); const c = tileCenter(tile); g.position.copy(c);
   const isRoad = tile.terrain === 'road';
+  // ballast, sleepers and both rails merge into ONE mesh per tile: a long main line
+  // used to cost four-plus draw calls per tile, which does not scale on a map this size
+  const parts = [], temp = [];
   for (const p of tile.paths) {
     const segs = p.isCurve ? 12 : 2;
-    if (!isRoad) g.add(new THREE.Mesh(ribbonGeometry(p.curve, 1.3, 0.05, segs), MAT.ballast));
-    else g.add(new THREE.Mesh(ribbonGeometry(p.curve, 1.25, 0.06, segs), MAT.concrete));
-    const n = p.isCurve ? 8 : 10; const inst = new THREE.InstancedMesh(sleeperGeo, MAT.sleeper, n); const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3(1, 1, 1);
-    for (let i = 0; i < n; i++) { const t = (i + 0.5) / n; const pt = p.curve.getPoint(t), tg = p.curve.getTangent(t); q.setFromAxisAngle(up, Math.atan2(-tg.z, tg.x)); m4.compose(new THREE.Vector3(pt.x, 0.12, pt.z), q, sc); inst.setMatrixAt(i, m4); }
-    inst.receiveShadow = true; if (!isRoad) g.add(inst);
-    for (const off of [-0.5, 0.5]) { const r = new THREE.Mesh(new THREE.TubeGeometry(new OffsetCurve(p.curve, off, 0.24), p.isCurve ? 14 : 2, 0.075, 5, false), MAT.rail); r.castShadow = true; g.add(r); }
+    const bed = ribbonGeometry(p.curve, isRoad ? 1.25 : 1.3, isRoad ? 0.06 : 0.05, segs); temp.push(bed);
+    parts.push({ geo: bed, c: isRoad ? 0x9d9d97 : 0x9a917f, p: [0, 0, 0] });
+    if (!isRoad) {
+      const n = p.isCurve ? 8 : 10;
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n, pt = p.curve.getPoint(t), tg = p.curve.getTangent(t);
+        parts.push({ geo: sleeperGeo, c: 0x5b4632, p: [pt.x, 0.12, pt.z], r: [0, Math.atan2(-tg.z, tg.x), 0] });
+      }
+    }
+    for (const off of [-0.5, 0.5]) {
+      const rail = new THREE.TubeGeometry(new OffsetCurve(p.curve, off, 0.24), p.isCurve ? 14 : 2, 0.075, 5, false); temp.push(rail);
+      parts.push({ geo: rail, c: 0xbcc2c8, p: [0, 0, 0] });
+    }
   }
+  const bedMesh = new THREE.Mesh(mergeParts(parts), MAT.painted);
+  bedMesh.castShadow = true; bedMesh.receiveShadow = true; g.add(bedMesh);
+  temp.forEach(t => t.dispose());
   if (tile.sw) {
     tile.swRibbons = tile.paths.map(p => { const m = new THREE.Mesh(ribbonGeometry(p.curve, 0.14, 0.32, p.isCurve ? 12 : 2), MAT.yellow); g.add(m); return m; });
     updateSwitchVisual(tile);
@@ -620,7 +929,7 @@ function dispatch(train, place) {
   const r2 = findRoute(tail.tile, tail.fwd ? tail.path.a : tail.path.b, goal);
   let route = r1;
   if (r2 && (!r1 || r2.size < r1.size)) { reverseTrain(train); route = r2; }
-  if (!route) { toast(`No route from here to ${place.name}. Lay some track!`, 'bad'); return; }
+  if (!route) { toast(`${train.name} cannot reach ${place.name} from here — the junction may face the other way. Try sending it to Central Station first, or lay more track.`, 'bad'); return; }
   train.target = place; train.route = route; train.hold = false; train.unload = 0;
   toast(`${train.name} → ${place.name}`);
 }
@@ -665,7 +974,7 @@ function arrive(train) {
     const d = Math.abs(origin.stop[0] - place.stop[0]) + Math.abs(origin.stop[1] - place.stop[1]); const reward = 200 + 50 * d;
     game.money += reward; game.deliveries++; game.served.add(place.id);
     toast(`${train.name} delivered ${origin.name} → ${place.name}: +${fmtMoney(reward)}`, 'good');
-    if (['harbour', 'quarry', 'hilltown'].every(id => game.served.has(id)) && !game.allServed) { game.allServed = true; setTimeout(() => toast('🏆 All destinations served! Keep the island moving.', 'good'), 800); }
+    if (DESTINATIONS.every(id => game.served.has(id)) && !game.allServed) { game.allServed = true; setTimeout(() => toast('🏆 All destinations served! Keep the island moving.', 'good'), 800); }
   } else toast(`${train.name} arrived at ${place.name}.`);
   train.lastPlace = place; updateHUD();
 }
@@ -714,45 +1023,175 @@ function updateTrains(dt) {
   selMarker.visible = !!game.selected; if (game.selected) { const m = game.selected.cars[0].mesh; selMarker.position.set(m.position.x, 4.2 + Math.sin(game.time * 4) * 0.25, m.position.z); }
 }
 
-// ---------- roads: cars & crossings ----------
-const roads = [{ axis: 0, c: ROAD_X * T + 2, L: MAPH * T, crossings: [] }, { axis: 1, c: ROAD_Z * T + 2, L: MAPW * T, crossings: [] }];
-function refreshCrossings() { roads.forEach(r => r.crossings = []); for (const row of tiles) for (const t of row) if (t.crossing) roads[t.roadAxis].crossings.push(t); }
-const roadCars = [];
-function buildRoadCar() {
-  const g = new THREE.Group(); const col = [0xe8e8e8, 0xd94b3d, 0x3d6fd9, 0xf2c14e, 0x3a3a3a, 0x7bc47f][Math.floor(rnd() * 6)];
-  box(2.0, 0.55, 1.0, new THREE.MeshLambertMaterial({ color: col }), 0, 0.55, 0, g); box(1.1, 0.5, 0.9, new THREE.MeshLambertMaterial({ color: 0x9fd0e8 }), -0.15, 1.05, 0, g);
-  for (const x of [-0.65, 0.65]) for (const z of [-0.5, 0.5]) { const w = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.2, 10), MAT.dark); w.position.set(x, 0.24, z); w.rotation.x = Math.PI / 2; g.add(w); }
-  scene.add(g); return g;
+// ---------- roads: traffic lights, cars & level crossings ----------
+function refreshCrossings() {
+  ROADS.forEach(r => r.crossings = []);
+  for (const row of tiles) for (const t of row) if (t.crossing && t.roadIdx !== undefined) ROADS[t.roadIdx].crossings.push(t);
 }
-for (const r of roads) for (const lane of [1, -1]) for (let i = 0; i < 3; i++) roadCars.push({ road: r, lane, s: (i / 3) * r.L + rnd() * 10, v: 5, mesh: buildRoadCar() });
-function updateRoads(dt) {
-  // gates
-  for (const r of roads) for (const t of r.crossings) {
-    const cr = t.crossing; let near = false;
-    for (const tr of trains) { for (const c of tr.cars) if (c.pos.distanceToSquared(cr.center) < 16 * 16) { near = true; break; } if (near) break; }
-    cr.gate = clamp(cr.gate + (near ? 1 : -1) * dt * 0.7, 0, 1);
-    cr.pivots.forEach(p => p.rotation.z = (1 - cr.gate) * Math.PI / 2);
-    const on = near || cr.gate > 0; const ph = Math.floor(game.time * 2.5) % 2;
-    cr.lamps.forEach((lm, i) => lm.color.set(on && (i % 2 === ph) ? 0xff2020 : 0x3a0808));
+// ---- vehicles: each one merged into a single draw call, brake lights repainted live ----
+const VEHICLES = [
+  { name: 'sedan', len: 4.6, build: c => [
+    { geo: new THREE.BoxGeometry(4.4, 0.85, 1.9), c, p: [0, 0.72, 0] },
+    { geo: new THREE.BoxGeometry(2.5, 0.8, 1.78), c, p: [-0.15, 1.5, 0] },
+    { geo: new THREE.BoxGeometry(2.2, 0.55, 1.84), c: 0x20303c, p: [-0.15, 1.55, 0] },
+    { geo: new THREE.BoxGeometry(0.12, 0.5, 1.7), c: 0x20303c, p: [1.08, 1.5, 0] },
+    { geo: new THREE.BoxGeometry(4.5, 0.22, 1.95), c: 0x1b1d21, p: [0, 0.38, 0] },
+    { geo: new THREE.BoxGeometry(0.25, 0.3, 0.45), c: 0xfff6cf, p: [2.15, 0.85, 0.62] },
+    { geo: new THREE.BoxGeometry(0.25, 0.3, 0.45), c: 0xfff6cf, p: [2.15, 0.85, -0.62] },
+    { geo: new THREE.BoxGeometry(0.18, 0.28, 0.5), c: 0x5c1410, p: [-2.2, 0.9, 0.62], tag: 'brake' },
+    { geo: new THREE.BoxGeometry(0.18, 0.28, 0.5), c: 0x5c1410, p: [-2.2, 0.9, -0.62], tag: 'brake' },
+    { geo: new THREE.BoxGeometry(0.35, 0.16, 0.4), c: 0x2b2f36, p: [0.9, 1.45, 1.0] },
+  ] },
+  { name: 'hatch', len: 4.0, build: c => [
+    { geo: new THREE.BoxGeometry(3.8, 0.9, 1.85), c, p: [0, 0.74, 0] },
+    { geo: new THREE.BoxGeometry(2.3, 0.95, 1.74), c, p: [-0.35, 1.55, 0] },
+    { geo: new THREE.BoxGeometry(2.0, 0.6, 1.8), c: 0x20303c, p: [-0.35, 1.62, 0] },
+    { geo: new THREE.BoxGeometry(3.9, 0.22, 1.9), c: 0x1b1d21, p: [0, 0.38, 0] },
+    { geo: new THREE.BoxGeometry(0.22, 0.3, 0.4), c: 0xfff6cf, p: [1.85, 0.85, 0.6] },
+    { geo: new THREE.BoxGeometry(0.22, 0.3, 0.4), c: 0xfff6cf, p: [1.85, 0.85, -0.6] },
+    { geo: new THREE.BoxGeometry(0.16, 0.5, 0.4), c: 0x5c1410, p: [-1.88, 1.25, 0.66], tag: 'brake' },
+    { geo: new THREE.BoxGeometry(0.16, 0.5, 0.4), c: 0x5c1410, p: [-1.88, 1.25, -0.66], tag: 'brake' },
+  ] },
+  { name: 'van', len: 5.4, build: c => [
+    { geo: new THREE.BoxGeometry(5.2, 2.3, 2.1), c, p: [-0.3, 1.45, 0] },
+    { geo: new THREE.BoxGeometry(1.6, 1.3, 2.05), c, p: [2.2, 0.95, 0] },
+    { geo: new THREE.BoxGeometry(0.14, 0.8, 1.9), c: 0x20303c, p: [2.9, 1.35, 0] },
+    { geo: new THREE.BoxGeometry(1.0, 0.7, 2.12), c: 0x20303c, p: [1.9, 1.55, 0] },
+    { geo: new THREE.BoxGeometry(5.4, 0.24, 2.15), c: 0x1b1d21, p: [0, 0.4, 0] },
+    { geo: new THREE.BoxGeometry(0.22, 0.28, 0.45), c: 0xfff6cf, p: [2.96, 0.6, 0.7] },
+    { geo: new THREE.BoxGeometry(0.22, 0.28, 0.45), c: 0xfff6cf, p: [2.96, 0.6, -0.7] },
+    { geo: new THREE.BoxGeometry(0.16, 0.6, 0.42), c: 0x5c1410, p: [-2.92, 1.4, 0.78], tag: 'brake' },
+    { geo: new THREE.BoxGeometry(0.16, 0.6, 0.42), c: 0x5c1410, p: [-2.92, 1.4, -0.78], tag: 'brake' },
+  ] },
+  { name: 'bus', len: 9.5, build: c => [
+    { geo: new THREE.BoxGeometry(9.2, 2.8, 2.4), c, p: [0, 1.8, 0] },
+    { geo: new THREE.BoxGeometry(8.4, 0.9, 2.44), c: 0x20303c, p: [0, 2.5, 0] },
+    { geo: new THREE.BoxGeometry(0.14, 1.3, 2.2), c: 0x20303c, p: [4.62, 2.1, 0] },
+    { geo: new THREE.BoxGeometry(9.3, 0.3, 2.45), c: 0x1b1d21, p: [0, 0.5, 0] },
+    { geo: new THREE.BoxGeometry(9.3, 0.18, 2.5), c: 0xe8e8e8, p: [0, 1.05, 0] },
+    { geo: new THREE.BoxGeometry(0.22, 0.3, 0.5), c: 0xfff6cf, p: [4.68, 0.8, 0.85] },
+    { geo: new THREE.BoxGeometry(0.22, 0.3, 0.5), c: 0xfff6cf, p: [4.68, 0.8, -0.85] },
+    { geo: new THREE.BoxGeometry(0.16, 0.45, 0.5), c: 0x5c1410, p: [-4.68, 1.1, 0.9], tag: 'brake' },
+    { geo: new THREE.BoxGeometry(0.16, 0.45, 0.5), c: 0x5c1410, p: [-4.68, 1.1, -0.9], tag: 'brake' },
+  ] },
+  { name: 'truck', len: 8.5, build: c => [
+    { geo: new THREE.BoxGeometry(2.6, 2.4, 2.3), c, p: [2.8, 1.6, 0] },
+    { geo: new THREE.BoxGeometry(0.14, 1.0, 2.1), c: 0x20303c, p: [4.06, 2.1, 0] },
+    { geo: new THREE.BoxGeometry(5.2, 2.8, 2.4), c: 0xd8d4c8, p: [-1.4, 1.9, 0] },
+    { geo: new THREE.BoxGeometry(8.4, 0.3, 2.45), c: 0x1b1d21, p: [0, 0.5, 0] },
+    { geo: new THREE.BoxGeometry(0.24, 0.3, 0.5), c: 0xfff6cf, p: [4.1, 0.75, 0.85] },
+    { geo: new THREE.BoxGeometry(0.24, 0.3, 0.5), c: 0xfff6cf, p: [4.1, 0.75, -0.85] },
+    { geo: new THREE.BoxGeometry(0.16, 0.4, 0.5), c: 0x5c1410, p: [-4.1, 1.0, 0.9], tag: 'brake' },
+    { geo: new THREE.BoxGeometry(0.16, 0.4, 0.5), c: 0x5c1410, p: [-4.1, 1.0, -0.9], tag: 'brake' },
+  ] },
+  { name: 'pickup', len: 5.0, build: c => [
+    { geo: new THREE.BoxGeometry(4.8, 0.95, 2.0), c, p: [0, 0.78, 0] },
+    { geo: new THREE.BoxGeometry(1.9, 1.0, 1.9), c, p: [0.7, 1.6, 0] },
+    { geo: new THREE.BoxGeometry(1.6, 0.62, 1.96), c: 0x20303c, p: [0.7, 1.68, 0] },
+    { geo: new THREE.BoxGeometry(2.3, 0.7, 1.94), c, p: [-1.35, 1.35, 0] },
+    { geo: new THREE.BoxGeometry(4.9, 0.24, 2.05), c: 0x1b1d21, p: [0, 0.4, 0] },
+    { geo: new THREE.BoxGeometry(0.24, 0.3, 0.45), c: 0xfff6cf, p: [2.35, 0.9, 0.68] },
+    { geo: new THREE.BoxGeometry(0.24, 0.3, 0.45), c: 0xfff6cf, p: [2.35, 0.9, -0.68] },
+    { geo: new THREE.BoxGeometry(0.16, 0.3, 0.45), c: 0x5c1410, p: [-2.4, 1.0, 0.72], tag: 'brake' },
+    { geo: new THREE.BoxGeometry(0.16, 0.3, 0.45), c: 0x5c1410, p: [-2.4, 1.0, -0.72], tag: 'brake' },
+  ] },
+];
+const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.34, 12); wheelGeo.rotateX(Math.PI / 2);
+const hubGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.36, 8); hubGeo.rotateX(Math.PI / 2);
+const CAR_COLOURS = [0xe8e8e8, 0xd94b3d, 0x3d6fd9, 0xf2c14e, 0x2f3338, 0x7bc47f, 0x8c5bd6, 0xd98b3d, 0x3fb0a8];
+function buildVehicle(spec, colour) {
+  const parts = spec.build(colour);
+  const wb = spec.len / 2 - 0.9;
+  for (const wx of [wb, -wb]) for (const wz of [0.92, -0.92]) {
+    parts.push({ geo: wheelGeo, c: 0x1b1d21, p: [wx, 0.42, wz] });
+    parts.push({ geo: hubGeo, c: 0xa8adb4, p: [wx, 0.42, wz * 1.04] });
   }
-  // cars
+  return mergeParts(parts);
+}
+const roadCars = [];
+{
+  let seq = 0;
+  for (const r of ROADS) for (const lane of [1, -1]) {
+    const n = 7;
+    for (let i = 0; i < n; i++) {
+      const spec = VEHICLES[Math.floor(rnd() * VEHICLES.length)];
+      const mesh = new THREE.Mesh(buildVehicle(spec, CAR_COLOURS[seq++ % CAR_COLOURS.length]), MAT.painted);
+      mesh.castShadow = true; scene.add(mesh);
+      roadCars.push({ road: r, lane, spec, len: spec.len, s: (i / n) * r.L + rnd() * 14, v: 8, mesh, braking: false });
+    }
+  }
+}
+// gap from a car at road-position `pos` (travelling in `lane` direction) to a feature centred at `a0`
+const gapTo = (pos, lane, a0) => lane > 0 ? a0 - pos : pos - a0;
+function updateRoads(dt) {
+  // ---- traffic light cycle ----
+  for (const it of INTERSECTIONS) {
+    it.t += dt;
+    const dur = (it.phase === 1 || it.phase === 3) ? AMBER_T : GREEN_T;
+    if (it.t > dur) { it.t = 0; it.phase = (it.phase + 1) & 3; }
+    for (const h of it.lamps) {
+      const green = lightGreen(it, h.axis), amber = lightAmber(it, h.axis);
+      h.mats[0].color.setHex(!green && !amber ? 0xff2a2a : 0x2a0d0d);
+      h.mats[1].color.setHex(amber ? 0xffb52a : 0x2e2411);
+      h.mats[2].color.setHex(green ? 0x2aff5a : 0x0d2a13);
+    }
+  }
+  // ---- level-crossing gates ----
+  for (const r of ROADS) for (const t of r.crossings) {
+    const cr = t.crossing; let near = false;
+    for (const tr of trains) { for (const c of tr.cars) if (c.pos.distanceToSquared(cr.center) < 20 * 20) { near = true; break; } if (near) break; }
+    cr.gate = clamp(cr.gate + (near ? 1 : -1) * dt * 0.7, 0, 1);
+    cr.pivots.forEach(pv => pv.rotation.z = (1 - cr.gate) * Math.PI / 2);
+    const on = near || cr.gate > 0, ph = Math.floor(game.time * 2.5) % 2;
+    cr.lamps.forEach((lm, i) => lm.color.setHex(on && (i % 2 === ph) ? 0xff2020 : 0x3a0808));
+  }
+  // ---- cars ----
   const lanes = new Map();
-  for (const car of roadCars) { const k = car.road.axis + ':' + car.lane; if (!lanes.has(k)) lanes.set(k, []); lanes.get(k).push(car); }
+  for (const car of roadCars) { const k = car.road.id + ':' + car.lane; if (!lanes.has(k)) lanes.set(k, []); lanes.get(k).push(car); }
   for (const list of lanes.values()) {
     list.sort((a, b) => a.s - b.s);
     list.forEach((car, i) => {
-      const r = car.road; const pos = car.lane > 0 ? car.s : r.L - car.s; let stop = false;
-      for (const ct of r.crossings) { const a0 = (r.axis === 0 ? ct.z : ct.x) * T; const gap = car.lane > 0 ? a0 - pos : pos - (a0 + T); if (gap > -0.3 && gap < 3.4 && ct.crossing.gate > 0.02) stop = true; }
-      const next = list[i + 1]; if (next && next.s - car.s < 3.6) stop = true;
-      const tv = stop ? 0 : 5.5; car.v = tv > car.v ? Math.min(tv, car.v + 5 * dt) : Math.max(tv, car.v - 16 * dt);
-      car.s += car.v * dt; if (car.s > r.L + 3) car.s = -3;
+      const r = car.road, pos = car.lane > 0 ? car.s : r.L - car.s;
+      let stop = false, hardStop = false;
+      // red or amber light at an intersection ahead
+      for (const it of INTERSECTIONS) {
+        if (r.axis === 0 ? it.tx !== r.line : it.tz !== r.line) continue;
+        const a0 = r.axis === 0 ? it.z : it.x;
+        const gap = gapTo(pos, car.lane, a0) - 3.2;                 // to the stop line
+        if (gap < -1.5 || gap > 16) continue;
+        if (lightGreen(it, r.axis)) continue;
+        if (lightAmber(it, r.axis) && gap < car.v * 0.9) continue;  // too late to pull up
+        if (gap > -1.5) { stop = true; if (gap < 5) hardStop = true; }
+      }
+      // boom gates down
+      for (const ct of r.crossings) {
+        const a0 = (r.axis === 0 ? ct.z : ct.x) * T + 2;
+        const gap = gapTo(pos, car.lane, a0) - 3.2;
+        if (gap > -1.5 && gap < 14 && ct.crossing.gate > 0.02) { stop = true; if (gap < 5) hardStop = true; }
+      }
+      // the car in front
+      const next = list[i + 1];
+      if (next && next.s - car.s < car.len * 0.5 + next.len * 0.5 + 2.2) stop = true;
+      const tv = stop ? 0 : 9;
+      const wasV = car.v;
+      car.v = tv > car.v ? Math.min(tv, car.v + 5 * dt) : Math.max(tv, car.v - (hardStop ? 26 : 16) * dt);
+      const braking = car.v < wasV - 0.001 || (stop && car.v < 0.4);
+      if (braking !== car.braking) { car.braking = braking; paintRange(car.mesh, 'brake', braking ? 0xff3020 : 0x5c1410); }
+      car.s += car.v * dt; if (car.s > r.L + 6) car.s = -6;
       const p2 = car.lane > 0 ? car.s : r.L - car.s;
-      if (r.axis === 0) { car.mesh.position.set(r.c + (car.lane > 0 ? -0.95 : 0.95), 0, p2); car.mesh.rotation.y = Math.atan2(-car.lane, 0); }
-      else { car.mesh.position.set(p2, 0, r.c + (car.lane > 0 ? 0.95 : -0.95)); car.mesh.rotation.y = Math.atan2(0, car.lane); }
-      // hit by a train?
-      for (const ct of r.crossings) { const a0 = (r.axis === 0 ? ct.z : ct.x) * T; if (p2 < a0 - 1 || p2 > a0 + T + 1) continue; for (const tr of trains) for (const c of tr.cars) if (c.pos.distanceToSquared(car.mesh.position) < 2.1 * 2.1) { car.s = -3; car.v = 0; game.money -= 300; toast('🚗💥 A car was hit on the level crossing! -$300', 'bad'); updateHUD(); puff(car.mesh.position.x, 1.5, car.mesh.position.z, true); } }
+      if (r.axis === 0) { car.mesh.position.set(r.c + (car.lane > 0 ? -1.15 : 1.15), 0, p2); car.mesh.rotation.y = car.lane > 0 ? -Math.PI / 2 : Math.PI / 2; }
+      else { car.mesh.position.set(p2, 0, r.c + (car.lane > 0 ? 1.15 : -1.15)); car.mesh.rotation.y = car.lane > 0 ? 0 : Math.PI; }
+      // struck on a crossing?
+      for (const ct of r.crossings) {
+        const a0 = (r.axis === 0 ? ct.z : ct.x) * T + 2;
+        if (Math.abs(p2 - a0) > T) continue;
+        for (const tr of trains) for (const c of tr.cars) if (c.pos.distanceToSquared(car.mesh.position) < 2.4 * 2.4) {
+          car.s = -6; car.v = 0; game.money -= 300; toast('🚗💥 A car was hit on the level crossing! -$300', 'bad'); updateHUD(); puff(car.mesh.position.x, 1.5, car.mesh.position.z, true);
+        }
+      }
     });
   }
+  updateFlight(dt);
 }
 
 // ---------- building logic ----------
@@ -771,7 +1210,31 @@ function mergePair(tile, cur, pair) {
   if (occupancy.has(key(tile.x, tile.z))) return { err: 'A train is on that tile' };
   return { paths: [...cur, np], cost };
 }
-function chooseEndEdge(tile, d) { if (!tile.paths.length) return OPP(d); const edges = new Set(); tile.paths.forEach(p => { edges.add(p.a); edges.add(p.b); }); if (edges.has(OPP(d))) return OPP(d); for (const e of edges) if (e !== d) return e; return OPP(d); }
+// how much track lies beyond `tile` if you leave through `edge` (the tile itself blocks the walk back)
+function sideSize(tile, edge, limit = 400) {
+  const seen = new Set([key(tile.x, tile.z)]);
+  const stack = [tileAt(tile.x + DX[edge], tile.z + DZ[edge])];
+  let n = 0;
+  while (stack.length && n < limit) {
+    const t = stack.pop(); if (!t || !t.paths.length) continue;
+    const k = key(t.x, t.z); if (seen.has(k)) continue; seen.add(k); n++;
+    const es = new Set(); t.paths.forEach(q => { es.add(q.a); es.add(q.b); });
+    for (const e of es) stack.push(tileAt(t.x + DX[e], t.z + DZ[e]));
+  }
+  return n;
+}
+function chooseEndEdge(tile, d) {
+  if (!tile.paths.length) return OPP(d);
+  const edges = new Set(); tile.paths.forEach(p => { edges.add(p.a); edges.add(p.b); });
+  if (edges.has(OPP(d))) return OPP(d);
+  const cands = [...edges].filter(e => e !== d);
+  if (!cands.length) return OPP(d);
+  if (cands.length === 1) return cands[0];
+  // Branching off an existing line: the new curve shares this edge with the old path, and that
+  // shared edge becomes the switch trunk. Face it at the bigger half of the network, or trains
+  // coming from the main line cannot take the branch at all.
+  return cands.reduce((best, e) => sideSize(tile, e) > sideSize(tile, best) ? e : best);
+}
 function planFromPath(pathTiles) {
   const plan = []; const n = pathTiles.length;
   if (n === 1) return null;
@@ -793,7 +1256,7 @@ function evaluatePlan(plan) {
 }
 function applyTrack(res) {
   game.money -= res.total; const changed = new Set();
-  for (const o of res.out) { if (o.paths === o.tile.paths) continue; o.tile.paths = o.paths; recomputeSwitch(o.tile); if (o.tile.tree) { staticGroup.remove(o.tile.tree); o.tile.tree = null; } changed.add(o.tile); }
+  for (const o of res.out) { if (o.paths === o.tile.paths) continue; o.tile.paths = o.paths; recomputeSwitch(o.tile); clearTree(o.tile); changed.add(o.tile); }
   for (const t of changed) rebuildTile(t);
   afterTrackChange();
 }
@@ -837,15 +1300,16 @@ function toggleSwitch(tile) { if (occupancy.has(key(tile.x, tile.z))) { toast('A
 
 // ---------- save / load ----------
 function saveGame() {
-  const data = { money: game.money, deliveries: game.deliveries, served: [...game.served], tiles: [] };
+  const data = { v: 2, w: MAPW, money: game.money, deliveries: game.deliveries, served: [...game.served], tiles: [] };
   for (const row of tiles) for (const t of row) if (t.paths.length || Object.keys(t.signals).length) data.tiles.push({ x: t.x, z: t.z, p: t.paths.map(p => [p.a, p.b]), s: t.sw ? t.sw.state : 0, g: Object.fromEntries(Object.entries(t.signals).map(([e, s]) => [e, s.state])) });
   try { localStorage.setItem('islandrail-save', JSON.stringify(data)); toast('Layout saved', 'good'); } catch (e) { toast('Could not save (storage blocked)', 'bad'); }
 }
 function loadGame() {
   let data; try { data = JSON.parse(localStorage.getItem('islandrail-save')); } catch (e) { }
   if (!data) { toast('No saved layout found', 'bad'); return; }
+  if (data.v !== 2 || data.w !== MAPW) { toast('That save is from the older, smaller island and cannot be loaded', 'bad'); return; }
   for (const row of tiles) for (const t of row) if (!t.locked) { t.paths = []; t.sw = null; t.signals = {}; }
-  for (const s of data.tiles) { const t = tileAt(s.x, s.z); if (!t) continue; if (!t.locked) { t.paths = s.p.map(([a, b]) => getPath(a, b)); recomputeSwitch(t); if (t.sw) t.sw.state = s.s; } t.signals = {}; for (const e in s.g) t.signals[e] = { state: s.g[e] }; if (t.tree && t.paths.length) { staticGroup.remove(t.tree); t.tree = null; } }
+  for (const s of data.tiles) { const t = tileAt(s.x, s.z); if (!t) continue; if (!t.locked) { t.paths = s.p.map(([a, b]) => getPath(a, b)); recomputeSwitch(t); if (t.sw) t.sw.state = s.s; } t.signals = {}; for (const e in s.g) t.signals[e] = { state: s.g[e] }; if (t.paths.length) clearTree(t); }
   game.money = data.money; game.deliveries = data.deliveries; game.served = new Set(data.served || []);
   for (const row of tiles) for (const t of row) rebuildTile(t);
   trains.forEach(sendHome); game.selected = null; afterTrackChange(); toast('Layout loaded', 'good');
@@ -857,7 +1321,7 @@ const toastBox = $('toast');
 function toast(msg, kind = '') { const d = document.createElement('div'); d.className = 'toast ' + kind; d.textContent = msg; toastBox.appendChild(d); while (toastBox.children.length > 4) toastBox.firstChild.remove(); setTimeout(() => { d.style.transition = 'opacity .4s'; d.style.opacity = '0'; setTimeout(() => d.remove(), 420); }, 3200); }
 function updateHUD() {
   $('money').textContent = fmtMoney(game.money); $('money').style.color = game.money < 0 ? '#ff6b6b' : ''; $('deliv').textContent = game.deliveries;
-  $('objective').innerHTML = 'Serve ' + ['harbour', 'quarry', 'hilltown'].map(id => `<b class="${game.served.has(id) ? 'done' : ''}">${placeById(id).name}${game.served.has(id) ? ' ✓' : ''}</b>`).join(', ') + ' from Central Station.';
+  $('objective').innerHTML = 'Serve ' + DESTINATIONS.map(id => `<b class="${game.served.has(id) ? 'done' : ''}">${placeById(id).name}${game.served.has(id) ? ' ✓' : ''}</b>`).join(', ') + ' from Central Station.';
 }
 function renderTrainList() {
   $('trainList').innerHTML = trains.map((tr, i) => `<button class="train-btn ${game.selected === tr ? 'sel' : ''}" data-i="${i}"><span class="dot" style="background:#${tr.color.toString(16).padStart(6, '0')}"></span><span>${tr.name}</span><span class="st">${tr.status}</span></button>`).join('');
@@ -909,7 +1373,7 @@ function panCamera(dx, dy) {
   cam.target.z = clamp(cam.target.z + (-rz * side + fz * fwd), -10, MAPH * T + 10);
   game.follow = false;
 }
-function zoomBy(f) { cam.dist = clamp(cam.dist * f, 12, 170); }
+function zoomBy(f) { cam.dist = clamp(cam.dist * f, 12, 430); }
 function pinchState() { const [a, b] = [...pointers.values()]; return { d: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 }; }
 function cancelDraw() { if (drawPath) { drawPath = null; clearGhosts(); setTool(game.tool); } }
 canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -1028,12 +1492,12 @@ function frame(now) {
   cam.target.x = clamp(cam.target.x, -10, MAPW * T + 10); cam.target.z = clamp(cam.target.z, -10, MAPH * T + 10);
   if (game.follow && game.selected) { const m = game.selected.cars[0].mesh; cam.target.lerp(new THREE.Vector3(m.position.x, 0, m.position.z), 1 - Math.pow(0.02, dt)); }
   updateTrains(dt); updateRoads(dt); updateSmoke(dt);
-  updateCamera(); renderer.render(scene, camera);
+  updateSun(); updateCamera(); renderer.render(scene, camera);
   uiT += dt; if (uiT > 0.25) { uiT = 0; renderTrainList(); }
 }
 requestAnimationFrame(frame);
 // debug / modding hooks
-window.IslandRail = { cam, updateCamera, panCamera, zoomBy, pointers, crash, placeSignal, rotateTile, game, trains, tiles, tileAt, PLACES, placeById, planFromPath, evaluatePlan, applyTrack, dispatch, toggleSignal, setSwitch, eraseTile, findRoute, lookahead };
+window.IslandRail = { cam, updateCamera, panCamera, zoomBy, pointers, INTERSECTIONS, ROADS, roadCars, flight, AIRPORT, DESTINATIONS, updateTrains, updateRoads, updateTerrain, crash, placeSignal, rotateTile, game, trains, tiles, tileAt, PLACES, placeById, planFromPath, evaluatePlan, applyTrack, dispatch, toggleSignal, setSwitch, eraseTile, findRoute, lookahead };
 </script>
 </body>
 </html>

@@ -17,12 +17,18 @@ actions in one place — KPIs, charts, and sortable/searchable tables.
 step). Open it directly or serve the repo and visit `/train-set/`.
 
 - Starts with **Central Station** and a three-road **holding yard** with trains parked.
-- **Drag to lay track** to the Harbour, Quarry and Hilltown. Branch off a line for a
-  switch, cross a line at right angles for a diamond.
-- Track over a **road** becomes a level crossing with boom gates and queuing cars;
-  track through a **hill** becomes a tunnel with portals (both cost extra).
+- **Drag to lay track** to the Harbour, Quarry, Hilltown and the **Airport**. Branch off a
+  line for a switch, cross a line at right angles for a diamond.
+- Track over a **road** becomes a level crossing with boom gates; track through a **hill**
+  becomes a tunnel with portals (both cost extra).
+- Four streets meet at **signalled intersections**. Cars, vans, buses and trucks queue at
+  red, show brake lights, and pull away on green.
+- The **airport** has a working runway: an airliner taxis, takes off, and comes back on
+  approach, with more parked on the apron.
 - Trains **obey the track controls**: red signals, switch settings, trains ahead,
   curve speed limits. Two trains on one tile is a crash.
+- The island is **168x168 tiles**, six times the width of the original, with the city
+  spread over only twice the area, so there is room on every side to expand.
 - Deliveries between places earn money; Save/Load keeps your layout in the browser.
 
 ## Quick start
