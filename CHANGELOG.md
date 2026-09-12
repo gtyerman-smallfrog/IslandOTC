@@ -10,6 +10,21 @@ change it describes, and add a section here.
 
 ---
 
+## v1.03
+
+- **Undo.** The ↩ button beside the tools, or Ctrl+Z, takes back the last thing you built,
+  erased or rotated. It is genuinely free: each change is recorded together with the
+  balance from before it, and undoing restores that exact balance rather than paying a
+  refund, so nothing is lost to an accidental drag.
+- It goes back through the last 60 changes, not just one, and covers laying track, erasing,
+  rotating a piece, and placing or removing a signal. Throwing a switch or changing a
+  signal is not stacked, since both are free and undone by clicking again.
+- Trees cleared to make way for track come back when the track is undone.
+- Undo refuses, without charging anything, if a train is standing on the track it would
+  remove. Loading a saved layout clears the history, since the whole map is replaced.
+- The button is greyed out when there is nothing to undo, and its tooltip names what will
+  go next.
+
 ## v1.02
 
 - **The island now has a coast.** An eight-tile band of open water runs right around the

@@ -24,7 +24,8 @@
   #tools { top: 70px; left: 12px; display: flex; flex-direction: column; gap: 6px; width: 190px; }
   #tools button, #panel button, #help button { font: inherit; }
   .tb { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: rgba(255,255,255,0.04); color: #e8edf3; cursor: pointer; text-align: left; }
-  .tb:hover { background: rgba(255,255,255,0.1); }
+  .tb:hover:not(:disabled) { background: rgba(255,255,255,0.1); }
+  .tb:disabled { opacity: .35; cursor: default; }
   .tb.active { background: rgba(244,197,66,0.18); border-color: var(--accent); color: #fff; }
   .tb kbd { margin-left: auto; font: 11px ui-monospace, monospace; background: rgba(255,255,255,0.1); padding: 1px 6px; border-radius: 4px; }
   .tb .ic { width: 18px; text-align: center; }
@@ -109,6 +110,7 @@
     <button class="tb" data-tool="signal"><span class="ic">🚦</span><span class="lbl">Signal</span><kbd>3</kbd></button>
     <button class="tb" data-tool="erase"><span class="ic">🧹</span><span class="lbl">Erase</span><kbd>4</kbd></button>
     <label class="chk"><input type="checkbox" id="autoRoute" checked> Auto-set switches</label>
+    <button class="tb" id="btnUndo" title="Nothing to undo"><span class="ic">↩</span><span class="lbl">Undo</span></button>
     <div id="status">Drag to lay track.</div>
   </div>
   <div class="card row">
@@ -163,6 +165,7 @@
       <li><kbd>3</kbd> <b>Signal</b>: click near the end of a track piece to place a signal (starts red). Click a signal any time to toggle red / green.</li>
       <li><kbd>1</kbd> <b>Select</b>: click a switch to throw it, click a train to open its control panel and send it somewhere.</li>
       <li><kbd>4</kbd> <b>Erase</b>: remove track or signals (half refund).</li>
+      <li><b>Undo</b> (the ↩ button or <kbd>Ctrl</kbd>+<kbd>Z</kbd>): takes back the last thing you built, erased or rotated, and returns exactly what it cost. Undoing is always free, and you can keep going back through your recent changes.</li>
       <li>Camera: left-drag orbit, right-drag or <kbd>Shift</kbd>+drag pan, wheel zoom, <kbd>W A S D</kbd> move, <kbd>Q</kbd>/<kbd>E</kbd> rotate.</li>
       <li>On a touchscreen: one finger orbits (or lays track), <b>two fingers pinch to zoom and drag to move around the island</b>. The + and − buttons zoom as well, and 🚂 opens the train list.</li>
     </ul>
@@ -180,7 +183,7 @@ if (typeof THREE === 'undefined') { document.getElementById('help').innerHTML = 
 
 // ---------- constants & helpers ----------
 // App version. Bump by 0.01 on every update (see CHANGELOG.md).
-const VERSION = '1.02';
+const VERSION = '1.03';
 const T = 4;                 // tile size in world units
 const MAPW = 168, MAPH = 168;  // tiles — 6x the old 28, with landmarks only spread 2x, leaving room for the city to grow
 const DX = [0, 1, 0, -1], DZ = [-1, 0, 1, 0];       // N E S W
@@ -820,9 +823,14 @@ const treeSlots = [];
 }
 function clearTree(t) {
   if (t.treeIdx === undefined) return;
-  const m4 = new THREE.Matrix4().makeScale(0, 0, 0);
-  for (const im of treeSlots) { im.setMatrixAt(t.treeIdx, m4); im.instanceMatrix.needsUpdate = true; }
-  t.treeIdx = undefined;
+  const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  t.treeMats = treeSlots.map(im => { const m = new THREE.Matrix4(); im.getMatrixAt(t.treeIdx, m); im.setMatrixAt(t.treeIdx, zero); im.instanceMatrix.needsUpdate = true; return m; });
+  t.treeGone = t.treeIdx; t.treeIdx = undefined;
+}
+function restoreTree(t) {
+  if (t.treeGone === undefined || !t.treeMats) return;
+  treeSlots.forEach((im, i) => { im.setMatrixAt(t.treeGone, t.treeMats[i]); im.instanceMatrix.needsUpdate = true; });
+  t.treeIdx = t.treeGone; t.treeGone = undefined; t.treeMats = null;
 }
 
 // ---------- track meshes ----------
@@ -1353,7 +1361,55 @@ function evaluatePlan(plan) {
   for (const step of plan) { const k = key(step.tile.x, step.tile.z); const cur = tmp.get(k) || step.tile.paths; const r = mergePair(step.tile, cur, step.pair); if (r.err) return { err: r.err, tile: step.tile }; tmp.set(k, r.paths); total += r.cost; out.push({ tile: step.tile, paths: r.paths, cost: r.cost }); }
   return { total, out };
 }
+// ---------- undo ----------
+// Every change that costs or refunds money is recorded together with the balance from
+// before it. Undoing restores the layout AND that exact balance, so it never costs a penny.
+const undoStack = [], UNDO_MAX = 60;
+function pushUndo(label, tileList) {
+  const seen = new Set(), snaps = [];
+  for (const t of tileList) {
+    const k = key(t.x, t.z); if (seen.has(k)) continue; seen.add(k);
+    snaps.push({
+      t, paths: t.paths.slice(),
+      sw: t.sw ? { trunk: t.sw.trunk, state: t.sw.state } : null,
+      signals: Object.keys(t.signals).map(e => [+e, t.signals[e].state]),
+      treeIdx: t.treeIdx,
+    });
+  }
+  undoStack.push({ label, money: game.money, tiles: snaps });
+  while (undoStack.length > UNDO_MAX) undoStack.shift();
+  updateUndoButton();
+}
+function undo() {
+  const u = undoStack[undoStack.length - 1];
+  if (!u) { toast('Nothing to undo'); return; }
+  for (const sn of u.tiles) {                       // never pull track out from under a train
+    const differs = sn.paths.length !== sn.t.paths.length || sn.paths.some((p, i) => p !== sn.t.paths[i]);
+    if (differs && occupancy.has(key(sn.t.x, sn.t.z))) { toast('A train is on that track — move it first', 'bad'); return; }
+  }
+  undoStack.pop();
+  const back = u.money - game.money;
+  for (const sn of u.tiles) {
+    const t = sn.t;
+    t.paths = sn.paths.slice();
+    t.sw = sn.sw ? { trunk: sn.sw.trunk, state: sn.sw.state } : null;
+    t.signals = {}; for (const [e, st] of sn.signals) t.signals[e] = { state: st };
+    if (sn.treeIdx !== undefined && t.treeIdx === undefined) restoreTree(t);
+  }
+  game.money = u.money;                             // exactly the balance from before
+  for (const sn of u.tiles) rebuildTile(sn.t);
+  afterTrackChange(); updateUndoButton();
+  toast(`Undid ${u.label}${back > 0 ? ' · ' + fmtMoney(back) + ' back' : back < 0 ? ' · ' + fmtMoney(-back) + ' charged' : ''}`, 'good');
+}
+function updateUndoButton() {
+  const b = $('btnUndo'); if (!b) return;
+  const u = undoStack[undoStack.length - 1];
+  b.disabled = !u;
+  b.title = u ? `Undo ${u.label} (Ctrl+Z)` : 'Nothing to undo';
+}
+
 function applyTrack(res) {
+  pushUndo(res.out.length > 1 ? `laying ${res.out.length} tiles of track` : 'laying track', res.out.map(o => o.tile));
   game.money -= res.total; const changed = new Set();
   for (const o of res.out) { if (o.paths === o.tile.paths) continue; o.tile.paths = o.paths; recomputeSwitch(o.tile); clearTree(o.tile); changed.add(o.tile); }
   for (const t of changed) rebuildTile(t);
@@ -1364,6 +1420,7 @@ function eraseTile(tile) {
   if (!tile.paths.length) { return false; }
   if (tile.locked) { toast('Station and yard track cannot be removed', 'bad'); return false; }
   if (occupancy.has(key(tile.x, tile.z))) { toast('A train is on that tile', 'bad'); return false; }
+  pushUndo('removing track', [tile]);
   let refund = 0; tile.paths.forEach(p => refund += pathCost(p)); if (tile.sw) refund += COST.switch; if (tile.terrain === 'hill') refund += COST.tunnel; if (tile.terrain === 'road') refund += COST.crossing; refund += Object.keys(tile.signals).length * COST.signal;
   refund = Math.round(refund / 2); game.money += refund;
   tile.paths = []; tile.sw = null; tile.signals = {}; rebuildTile(tile); afterTrackChange(); toast(`Removed track, +${fmtMoney(refund)} refund`); return true;
@@ -1374,6 +1431,7 @@ function rotateTile(tile) {
   if (Object.keys(tile.signals).length) { toast('Remove the signal before rotating', 'bad'); return false; }
   const p = tile.paths[0]; const np = getPath((p.a + 1) & 3, (p.b + 1) & 3);
   if (tile.terrain === 'road') { toast('A crossing must stay at right angles to the road', 'bad'); return false; }
+  pushUndo('rotating a piece', [tile]);
   tile.paths = [np]; rebuildTile(tile); afterTrackChange(); return true;
 }
 function placeSingle(tile) {
@@ -1391,10 +1449,11 @@ function placeSignal(tile, local) {
   let best = -1, bd = -Infinity; for (const e of edges) { const d = local.x * EM[e][0] + local.z * EM[e][1]; if (d > bd) { bd = d; best = e; } }
   if (tile.signals[best]) { toggleSignal(tile, best); return; }
   if (game.money < COST.signal) { toast('Not enough money', 'bad'); return; }
+  pushUndo('placing a signal', [tile]);
   game.money -= COST.signal; tile.signals[best] = { state: 'red' }; rebuildTile(tile); updateHUD(); toast(`Signal placed (red) for trains leaving ${DN[best]}`);
 }
 function toggleSignal(tile, edge) { const s = tile.signals[edge]; s.state = s.state === 'red' ? 'green' : 'red'; updateSignalVisual(s); }
-function removeSignal(tile, edge) { delete tile.signals[edge]; game.money += COST.signal / 2; rebuildTile(tile); updateHUD(); toast('Signal removed'); }
+function removeSignal(tile, edge) { pushUndo('removing a signal', [tile]); delete tile.signals[edge]; game.money += COST.signal / 2; rebuildTile(tile); updateHUD(); toast('Signal removed'); }
 function toggleSwitch(tile) { if (occupancy.has(key(tile.x, tile.z))) { toast('A train is on the switch', 'bad'); return; } setSwitch(tile, tile.sw.state ? 0 : 1); }
 
 // ---------- save / load ----------
@@ -1411,7 +1470,8 @@ function loadGame() {
   for (const s of data.tiles) { const t = tileAt(s.x, s.z); if (!t) continue; if (!t.locked) { t.paths = s.p.map(([a, b]) => getPath(a, b)); recomputeSwitch(t); if (t.sw) t.sw.state = s.s; } t.signals = {}; for (const e in s.g) t.signals[e] = { state: s.g[e] }; if (t.paths.length) clearTree(t); }
   game.money = data.money; game.deliveries = data.deliveries; game.served = new Set(data.served || []);
   for (const row of tiles) for (const t of row) rebuildTile(t);
-  trains.forEach(sendHome); game.selected = null; afterTrackChange(); toast('Layout loaded', 'good');
+  trains.forEach(sendHome); game.selected = null; undoStack.length = 0; updateUndoButton();
+  afterTrackChange(); toast('Layout loaded', 'good');
 }
 
 // ---------- HUD ----------
@@ -1439,7 +1499,7 @@ $('destBtns').querySelectorAll('button').forEach(b => b.onclick = () => { if (ga
 $('btnHold').onclick = () => { if (game.selected) { game.selected.hold = !game.selected.hold; renderTrainList(); } };
 $('btnReverse').onclick = () => { const tr = game.selected; if (!tr || tr.wrecked) return; reverseTrain(tr); if (tr.target) { const h = tr.cars[0]; tr.route = findRoute(h.tile, h.fwd ? h.path.b : h.path.a, tr.target.tile); } toast(`${tr.name} reversed`); };
 $('btnFollow').onclick = () => { game.follow = !game.follow; renderTrainList(); };
-$('btnSave').onclick = saveGame; $('btnLoad').onclick = loadGame;
+$('btnUndo').onclick = undo; $('btnSave').onclick = saveGame; $('btnLoad').onclick = loadGame;
 $('btnHelp').onclick = () => $('help').style.display = 'flex';
 $('btnStart').onclick = () => { $('help').style.display = 'none'; if (document.body.classList.contains('touch')) toast('Two fingers: drag to move, pinch to zoom'); };
 $('autoRoute').onchange = e => { game.autoRoute = e.target.checked; };
@@ -1570,6 +1630,7 @@ const keys = {};
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return; keys[e.key.toLowerCase()] = true;
   if (e.key === '1') setTool('select'); if (e.key === '2') setTool('track'); if (e.key === '3') setTool('signal'); if (e.key === '4') setTool('erase');
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); }
   if (e.key === 'Escape') { setTool('select'); selectTrain(null); $('help').style.display = 'none'; }
   if (e.key === 'h' || e.key === 'H') $('help').style.display = $('help').style.display === 'none' ? 'flex' : 'none';
 });
@@ -1577,7 +1638,7 @@ addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
 // ---------- main loop ----------
 for (const row of tiles) for (const t of row) if (t.paths.length || Object.keys(t.signals).length) rebuildTile(t);
-afterTrackChange(); setTool('select'); renderTrainList();
+afterTrackChange(); setTool('select'); renderTrainList(); updateUndoButton();
 $('ver').textContent = 'v' + VERSION;
 $('helpVer').textContent = 'v' + VERSION;
 let last = performance.now(), uiT = 0;
@@ -1598,7 +1659,7 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 // debug / modding hooks
-window.IslandRail = { VERSION, SHIPS, PORT, cam, updateCamera, panCamera, zoomBy, pointers, INTERSECTIONS, ROADS, roadCars, flight, AIRPORT, DESTINATIONS, updateTrains, updateRoads, updateTerrain, crash, placeSignal, rotateTile, game, trains, tiles, tileAt, PLACES, placeById, planFromPath, evaluatePlan, applyTrack, dispatch, toggleSignal, setSwitch, eraseTile, findRoute, lookahead };
+window.IslandRail = { VERSION, undo, undoStack, pushUndo, removeSignal, updateShips, updateFlight, SHIPS, PORT, cam, updateCamera, panCamera, zoomBy, pointers, INTERSECTIONS, ROADS, roadCars, flight, AIRPORT, DESTINATIONS, updateTrains, updateRoads, updateTerrain, crash, placeSignal, rotateTile, game, trains, tiles, tileAt, PLACES, placeById, planFromPath, evaluatePlan, applyTrack, dispatch, toggleSignal, setSwitch, eraseTile, findRoute, lookahead };
 </script>
 </body>
 </html>

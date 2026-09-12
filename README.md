@@ -16,7 +16,7 @@ actions in one place — KPIs, charts, and sortable/searchable tables.
 `train-set/index.html` is a self-contained 3D train-set game (three.js, no build
 step). Open it directly or serve the repo and visit `/train-set/`.
 
-Currently **v1.02** — see [`CHANGELOG.md`](CHANGELOG.md). The version shows in the
+Currently **v1.03** — see [`CHANGELOG.md`](CHANGELOG.md). The version shows in the
 heads-up display and the help overlay, and rises by 0.01 with each update.
 
 - Starts with **Central Station** and a three-road **holding yard** with trains parked.
@@ -33,6 +33,7 @@ heads-up display and the help overlay, and rises by 0.01 with each update.
   curve speed limits. Two trains on one tile is a crash.
 - The island is **168x168 tiles**, six times the width of the original, with the city
   spread over only twice the area, so there is room on every side to expand.
+- **Undo** (↩ or Ctrl+Z) takes back the last change and returns exactly what it cost.
 - Deliveries between places earn money; Save/Load keeps your layout in the browser.
 
 ## Quick start
