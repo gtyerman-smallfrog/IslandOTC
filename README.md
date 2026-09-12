@@ -16,10 +16,11 @@ actions in one place — KPIs, charts, and sortable/searchable tables.
 `train-set/index.html` is a self-contained 3D train-set game (three.js, no build
 step). Open it directly or serve the repo and visit `/train-set/`.
 
-Currently **v1.01** — see [`CHANGELOG.md`](CHANGELOG.md). The version shows in the
+Currently **v1.02** — see [`CHANGELOG.md`](CHANGELOG.md). The version shows in the
 heads-up display and the help overlay, and rises by 0.01 with each update.
 
 - Starts with **Central Station** and a three-road **holding yard** with trains parked.
+- A **coastal port** on the east shore where cargo ships come alongside, work, and sail again.
 - **Drag to lay track** to the Harbour, Quarry, Hilltown and the **Airport**. Branch off a
   line for a switch, cross a line at right angles for a diamond.
 - Track over a **road** becomes a level crossing with boom gates; track through a **hill**

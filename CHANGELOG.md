@@ -10,6 +10,25 @@ change it describes, and add a section here.
 
 ---
 
+## v1.02
+
+- **The island now has a coast.** An eight-tile band of open water runs right around the
+  map, so the land reads as an island rather than a green sheet, with a sand rim along
+  every shoreline and the inland lake sharing the same sea surface.
+- **The harbour moved to the east coast.** It was on the inland lake, which is no place for
+  a port. It now sits on the shore at tile 152,94 with a proper quay: a concrete apron,
+  quay wall, bollards, two transit sheds and three gantry cranes reaching out over the
+  water.
+- **Ships dock.** Two cargo ships steam up the coast, come alongside their berth, lie there
+  working cargo, then put back out to sea. They ride the swell, sit at a realistic draught,
+  and turn rather than sliding when they come about.
+- Streets now stop at the shore instead of running into the sea, and cars wrap inside the
+  paved span rather than six units past the end of it.
+- The south-eastern range was reshaped to sit between the city and the new port, so the run
+  out there is a genuine choice between tunnelling through and going the long way round.
+- Starting money raised to 15,000, since the port is now a long haul.
+- Saved layouts from before this version are refused, as the map changed underneath them.
+
 ## v1.01
 
 - **Airport moved 8 tiles north.** It sat directly against the east-west street at z=74, so
