@@ -185,7 +185,7 @@ if (typeof THREE === 'undefined') { document.getElementById('help').innerHTML = 
 
 // ---------- constants & helpers ----------
 // App version. Bump by 0.01 on every update (see CHANGELOG.md).
-const VERSION = '1.04';
+const VERSION = '1.05';
 const T = 4;                 // tile size in world units
 const MAPW = 168, MAPH = 168;  // tiles — 6x the old 28, with landmarks only spread 2x, leaving room for the city to grow
 const DX = [0, 1, 0, -1], DZ = [-1, 0, 1, 0];       // N E S W
@@ -727,8 +727,8 @@ scene.add(airportGroup);
     lbox(0.28, 7, 0.28, new THREE.MeshLambertMaterial({ color: 0x50555c }), lx, 3.5, lz);  // lamp columns
     lbox(1.8, 0.3, 0.6, new THREE.MeshLambertMaterial({ color: 0xf0eede }), lx, 7.1, lz);
   }
-  lflat(10, 26, MAT.asphalt, 34, 0.05, 86);                                                // access lane off the west side
-  for (let z = 76; z <= 96; z += 5) lflat(0.22, 2.4, MAT.dash, 34, 0.07, z);
+  lflat(10, 22, MAT.asphalt, 34, 0.05, 86);                                                // car park mouth, west side
+  lflat(10, 22, MAT.asphalt, 102, 0.05, 86);                                                // car park mouth, east side
 }
 {  // the sign belongs to the group so it travels with the airport
   const sp = makeLabel('Airport'); sp.position.set(69, 16, 30); airportGroup.add(sp);
@@ -772,6 +772,72 @@ function apRail(on) {
   }
   if (on) { pl.stop = [AP.x + AP_RAIL.stopX, AP.z + AP_RAIL.z]; pl.tile = tileAt(pl.stop[0], pl.stop[1]); if (pl.tile) pl.tile.place = pl; }
 }
+// The car park needs a way out. This spur links it to the nearest north-south street and
+// is rebuilt every time the airport is dragged, so the connection always holds.
+const AP_SPUR = { axis: 1, spur: true, id: ROADS.length, line: 0, c: 0, s0: 0, L: 0, k0: 0, k1: -1, crossings: [] };
+ROADS.push(AP_SPUR);
+const spurGroup = new THREE.Group(); scene.add(spurGroup);
+const AP_CP = { z: 21, xW: 9, xE: 24 };                 // car park: middle row and its two edges, in tile offsets
+function apSpurPlan(nx, nz) {
+  const tz = nz + AP_CP.z, wEdge = nx + AP_CP.xW, eEdge = nx + AP_CP.xE;
+  let best = null;
+  for (const r of ROADS) {
+    if (r.axis !== 0 || r.spur) continue;
+    const side = r.line < wEdge ? 'w' : r.line > eEdge ? 'e' : null;
+    if (!side) continue;
+    const d = side === 'w' ? wEdge - r.line : r.line - eEdge;
+    if (!best || d < best.d) best = { r, side, d };
+  }
+  if (!best) return null;
+  return best.side === 'w'
+    ? { tz, k0: best.r.line + 1, k1: wEdge - 1, join: best.r.line }
+    : { tz, k0: eEdge + 1, k1: best.r.line - 1, join: best.r.line };
+}
+function apSpurApply(on) {
+  if (on) {
+    const plan = apSpurPlan(AP.x, AP.z);
+    if (!plan || plan.k1 < plan.k0) { AP_SPUR.k1 = AP_SPUR.k0 - 1; AP_SPUR.L = 0; return; }
+    AP_SPUR.line = plan.tz; AP_SPUR.c = plan.tz * T + 2;
+    AP_SPUR.k0 = plan.k0; AP_SPUR.k1 = plan.k1;
+    AP_SPUR.s0 = plan.k0 * T; AP_SPUR.L = (plan.k1 - plan.k0 + 1) * T;
+    for (let x = plan.k0; x <= plan.k1; x++) {
+      const t = tileAt(x, plan.tz); if (!t || t.terrain === 'road') continue;   // a street it crosses stays a street
+      if (t.terrain === 'grass') { t.terrain = 'road'; t.roadIdx = AP_SPUR.id; t.roadAxis = 1; t.apSpur = true; clearTree(t); }
+    }
+    // surface
+    const x0 = Math.min(plan.k0, plan.join) * T, x1 = (Math.max(plan.k1, plan.join) + 1) * T;
+    const strip = new THREE.Mesh(new THREE.PlaneGeometry(x1 - x0, T), MAT.asphalt);
+    strip.rotation.x = -Math.PI / 2; strip.position.set((x0 + x1) / 2, 0.03, AP_SPUR.c); strip.receiveShadow = true;
+    spurGroup.add(strip);
+    for (let x = x0 + 3; x < x1 - 3; x += 6) {
+      const d = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.14), MAT.dash);
+      d.rotation.x = -Math.PI / 2; d.position.set(x, 0.05, AP_SPUR.c); spurGroup.add(d);
+    }
+  } else {
+    for (let x = AP_SPUR.k0; x <= AP_SPUR.k1; x++) {
+      const t = tileAt(x, AP_SPUR.line); if (!t || !t.apSpur) continue;
+      t.terrain = 'grass'; t.roadIdx = undefined; t.roadAxis = -1; t.apSpur = false; t.crossing = null;
+      restoreTree(t); rebuildTile(t);
+    }
+    while (spurGroup.children.length) { const c = spurGroup.children.pop(); if (c.geometry) c.geometry.dispose(); }
+  }
+}
+function apSpurBlocked(nx, nz) {
+  const plan = apSpurPlan(nx, nz);
+  if (!plan) return 'The car park needs a street to connect to';
+  for (let x = plan.k0; x <= plan.k1; x++) {
+    const t = tileAt(x, plan.tz);
+    if (!t) return 'No room for the car park road';
+    if (t.apSpur || t.terrain === 'road') continue;
+    if (t.terrain === 'water') return 'The car park road would run into the water';
+    if (t.terrain === 'hill') return 'The car park road would run into a hill';
+    if (t.terrain === 'block') return 'The car park road is blocked by a building';
+    if (t.paths.length) return 'The car park road would run into the track';
+    if (t.place) return 'The car park road is blocked';
+  }
+  return null;
+}
+
 function apBlockers(nx, nz) {
   if (nx < LAND0 || nz < LAND0 || nx + AP_FOOT.w - 1 > LAND1 || nz + AP_FOOT.h - 1 > LAND1) return 'The airport has to stay on the island';
   const rects = [...AP_PAVED, ...AP_BUILT, [AP_RAIL.x0, AP_RAIL.z, AP_RAIL.x1, AP_RAIL.z]];
@@ -790,12 +856,12 @@ function apBlockers(nx, nz) {
       if (t.place) return 'Another destination is in the way';
       if (occupancy.has(key(t.x, t.z))) return 'A train is in the way';
     }
-  return null;
+  return apSpurBlocked(nx, nz);
 }
 function moveAirportTo(nx, nz) {
-  apRail(false); apMark(false);
+  apSpurApply(false); apRail(false); apMark(false);
   AP.x = nx; AP.z = nz;
-  apMark(true); apRail(true);
+  apMark(true); apRail(true); apSpurApply(true);
   airportGroup.position.set(AP.x * T, 0, AP.z * T);
   afterTrackChange();
 }
@@ -1315,18 +1381,29 @@ function buildVehicle(spec, colour) {
 const roadCars = [];
 {
   let seq = 0;
-  for (const r of ROADS) for (const lane of [1, -1]) {
+  for (const r of ROADS) { if (r.spur) continue; for (const lane of [1, -1]) {
     const n = 7;
     for (let i = 0; i < n; i++) {
       const spec = VEHICLES[Math.floor(rnd() * VEHICLES.length)];
       const mesh = new THREE.Mesh(buildVehicle(spec, CAR_COLOURS[seq++ % CAR_COLOURS.length]), MAT.painted);
       mesh.castShadow = true; scene.add(mesh);
-      roadCars.push({ road: r, lane, spec, len: spec.len, s: ((i / n) * r.L + rnd() * 14) % r.L, v: 8, mesh, braking: false });
+      roadCars.push({ road: r, lane, spec, len: spec.len, s: ((i / n) * r.L + rnd() * 14) % r.L, v: 8, mesh, braking: false, wait: 0 });
     }
-  }
+  } }
 }
 // gap from a car at road-position `pos` (travelling in `lane` direction) to a feature centred at `a0`
 const gapTo = (pos, lane, a0) => lane > 0 ? a0 - pos : pos - a0;
+// a handful of cars shuttling in and out of the airport car park
+function populateSpur() {
+  let seq = 40;
+  for (const lane of [1, -1]) for (let i = 0; i < 2; i++) {
+    const spec = VEHICLES[Math.floor(rnd() * VEHICLES.length)];
+    if (spec.len > 6) continue;
+    const mesh = new THREE.Mesh(buildVehicle(spec, CAR_COLOURS[seq++ % CAR_COLOURS.length]), MAT.painted);
+    mesh.castShadow = true; scene.add(mesh);
+    roadCars.push({ road: AP_SPUR, lane, spec, len: spec.len, s: rnd() * Math.max(1, AP_SPUR.L), v: 0, mesh, braking: false, wait: rnd() * 4 });
+  }
+}
 function updateRoads(dt) {
   // ---- traffic light cycle ----
   for (const it of INTERSECTIONS) {
@@ -1376,12 +1453,17 @@ function updateRoads(dt) {
       // the car in front
       const next = list[i + 1];
       if (next && next.s - car.s < car.len * 0.5 + next.len * 0.5 + 2.2) stop = true;
-      const tv = stop ? 0 : 9;
+      const tv = (stop || car.wait > 0) ? 0 : (r.spur ? 6 : 9);
       const wasV = car.v;
       car.v = tv > car.v ? Math.min(tv, car.v + 5 * dt) : Math.max(tv, car.v - (hardStop ? 26 : 16) * dt);
       const braking = car.v < wasV - 0.001 || (stop && car.v < 0.4);
       if (braking !== car.braking) { car.braking = braking; paintRange(car.mesh, 'brake', braking ? 0xff3020 : 0x5c1410); }
-      car.s += car.v * dt; if (car.s > r.L) car.s -= r.L;
+      if (car.wait > 0) { car.wait -= dt; car.v = 0; }
+      car.s += car.v * dt;
+      if (car.s > r.L) {
+        if (r.spur) { car.s = 0; car.lane = -car.lane; car.wait = 1.6 + rnd() * 2.5; }   // turn round at each end
+        else car.s -= r.L;
+      }
       const p2 = r.s0 + (car.lane > 0 ? car.s : r.L - car.s);
       if (r.axis === 0) { car.mesh.position.set(r.c + (car.lane > 0 ? -1.15 : 1.15), 0, p2); car.mesh.rotation.y = car.lane > 0 ? -Math.PI / 2 : Math.PI / 2; }
       else { car.mesh.position.set(p2, 0, r.c + (car.lane > 0 ? 1.15 : -1.15)); car.mesh.rotation.y = car.lane > 0 ? 0 : Math.PI; }
@@ -1784,7 +1866,7 @@ addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
 // ---------- main loop ----------
 for (const row of tiles) for (const t of row) if (t.paths.length || Object.keys(t.signals).length) rebuildTile(t);
-apMark(true); apRail(true); populateCarPark();
+apMark(true); apRail(true); apSpurApply(true); populateCarPark(); populateSpur();
 afterTrackChange(); setTool('select'); renderTrainList(); updateUndoButton();
 $('ver').textContent = 'v' + VERSION;
 $('helpVer').textContent = 'v' + VERSION;
@@ -1806,7 +1888,7 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 // debug / modding hooks
-window.IslandRail = { VERSION, pushUndoFn, AP, AP_FOOT, apBlockers, moveAirportTo, airportGroup, carParkCars, undo, undoStack, pushUndo, removeSignal, updateShips, updateFlight, SHIPS, PORT, cam, updateCamera, panCamera, zoomBy, pointers, INTERSECTIONS, ROADS, roadCars, flight, AIRPORT, DESTINATIONS, updateTrains, updateRoads, updateTerrain, crash, placeSignal, rotateTile, game, trains, tiles, tileAt, PLACES, placeById, planFromPath, evaluatePlan, applyTrack, dispatch, toggleSignal, setSwitch, eraseTile, findRoute, lookahead };
+window.IslandRail = { VERSION, AP_SPUR, apSpurPlan, apSpurBlocked, pushUndoFn, AP, AP_FOOT, apBlockers, moveAirportTo, airportGroup, carParkCars, undo, undoStack, pushUndo, removeSignal, updateShips, updateFlight, SHIPS, PORT, cam, updateCamera, panCamera, zoomBy, pointers, INTERSECTIONS, ROADS, roadCars, flight, AIRPORT, DESTINATIONS, updateTrains, updateRoads, updateTerrain, crash, placeSignal, rotateTile, game, trains, tiles, tileAt, PLACES, placeById, planFromPath, evaluatePlan, applyTrack, dispatch, toggleSignal, setSwitch, eraseTile, findRoute, lookahead };
 </script>
 </body>
 </html>

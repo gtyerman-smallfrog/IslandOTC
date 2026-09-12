@@ -10,6 +10,22 @@ change it describes, and add a section here.
 
 ---
 
+## v1.05
+
+- **The airport car park is now connected to the road network.** A spur runs from the car
+  park out to the nearest north-south street, so cars have somewhere to come from and go
+  to. It replaces the stub lane that previously led nowhere.
+- The spur is worked out from the airport's position rather than being fixed, so dragging
+  the airport rebuilds it against whichever street is now nearest, on whichever side. The
+  old one is torn up and its ground returns to grass, trees included.
+- Four cars shuttle along it, driving up to the car park, pausing, turning round and heading
+  back out to the street.
+- Placement now also requires a clear route for that spur. Drag the airport somewhere the
+  road would run into a hill, the water, a building or the track and it is refused, naming
+  which.
+- Spur tiles are proper road tiles, so track laid across one becomes a level crossing with
+  gates, exactly as it does on the main streets.
+
 ## v1.04
 
 - **Car park.** The airport now has one on the landside of the terminal: marked bays in two
