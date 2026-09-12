@@ -16,7 +16,7 @@ actions in one place — KPIs, charts, and sortable/searchable tables.
 `train-set/index.html` is a self-contained 3D train-set game (three.js, no build
 step). Open it directly or serve the repo and visit `/train-set/`.
 
-Currently **v1.00** — see [`CHANGELOG.md`](CHANGELOG.md). The version shows in the
+Currently **v1.01** — see [`CHANGELOG.md`](CHANGELOG.md). The version shows in the
 heads-up display and the help overlay, and rises by 0.01 with each update.
 
 - Starts with **Central Station** and a three-road **holding yard** with trains parked.

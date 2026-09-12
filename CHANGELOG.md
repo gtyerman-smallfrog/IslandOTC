@@ -10,6 +10,29 @@ change it describes, and add a section here.
 
 ---
 
+## v1.01
+
+- **Airport moved 8 tiles north.** It sat directly against the east-west street at z=74, so
+  the apron and the road ran into one another. There is now a nine-tile gap, and no road
+  tile lies under any airport pavement or building.
+- **Aircraft scaled to 55%.** They were drawn at roughly 24 units long against 4.6-unit
+  cars, which read as far too large beside the terminal.
+- **Take-offs no longer fly sideways.** The fuselage lies along the model's X axis, but the
+  flight code set a heading of plus or minus 90 degrees while the aircraft travelled along
+  X, so the nose pointed across the direction of travel for the whole cycle. Headings are
+  now 0 travelling east and 180 travelling west, and the climb attitude, which was pitching
+  the nose down, is the right way up.
+- **Fixed the taxi loop.** The aircraft teleported 80 units backwards at the end of each
+  circuit. It now taxis to a stand, waits, and goes round again continuously.
+- **Fixed the landing.** The glide path was flown on a fixed descent rate and floated the
+  whole runway, touching down past the western end and braking across the grass. It is now
+  derived from the runway geometry and touches down on the paving.
+- Added a rapid-exit taxiway where the aircraft leaves the runway, and stopped the holding
+  point link drawing over the runway edge.
+- On the ground the nose follows the actual direction of travel, so turning onto and off
+  the runway reads as a turn rather than a sideways slide.
+- No trees on pavement: tree placement now also avoids buildings and paved tiles.
+
 ## v1.00
 
 First numbered release. Everything built before versioning existed is folded into this

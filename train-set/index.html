@@ -180,7 +180,7 @@ if (typeof THREE === 'undefined') { document.getElementById('help').innerHTML = 
 
 // ---------- constants & helpers ----------
 // App version. Bump by 0.01 on every update (see CHANGELOG.md).
-const VERSION = '1.00';
+const VERSION = '1.01';
 const T = 4;                 // tile size in world units
 const MAPW = 168, MAPH = 168;  // tiles — 6x the old 28, with landmarks only spread 2x, leaving room for the city to grow
 const DX = [0, 1, 0, -1], DZ = [-1, 0, 1, 0];       // N E S W
@@ -364,7 +364,7 @@ const PLACES = [
   { id: 'harbour', name: 'Harbour', stop: [100, 94], icon: '⚓' },
   { id: 'quarry', name: 'Quarry', stop: [96, 108], icon: '⛏️' },
   { id: 'hilltown', name: 'Hilltown', stop: [64, 60], icon: '🏘️' },
-  { id: 'airport', name: 'Airport', stop: [122, 68], icon: '✈️' },
+  { id: 'airport', name: 'Airport', stop: [122, 66], icon: '✈️' },
   { id: 'yard1', name: 'Yard Road 1', stop: [70, 90], yard: true, icon: '🏗️' },
   { id: 'yard2', name: 'Yard Road 2', stop: [70, 92], yard: true, icon: '🏗️' },
   { id: 'yard3', name: 'Yard Road 3', stop: [70, 94], yard: true, icon: '🏗️' },
@@ -395,7 +395,7 @@ for (const z of [90, 92, 94]) for (let x = 59; x <= 76; x++) lay(x, z, E, Wn, tr
 for (let x = 97; x <= 103; x++) lay(x, 94, E, Wn, x >= 99 && x <= 101);     // harbour
 for (let x = 93; x <= 99; x++) lay(x, 108, E, Wn, x >= 95 && x <= 97);      // quarry
 for (let x = 61; x <= 67; x++) lay(x, 60, E, Wn, x >= 63 && x <= 65);       // hilltown
-for (let x = 119; x <= 125; x++) lay(x, 68, E, Wn, x >= 121 && x <= 123);   // airport
+for (let x = 119; x <= 125; x++) lay(x, 66, E, Wn, x >= 121 && x <= 123);   // airport
 tileAt(58, 85).signals[N] = { state: 'red' };   // yard exit signal
 
 // building footprints — track cannot be laid through these
@@ -405,12 +405,12 @@ const BLOCKS = [
   [96, 95, 108, 96], [110, 93, 111, 95],                     // harbour sheds
   [92, 110, 104, 112],                                        // quarry works
   [58, 54, 62, 57], [64, 54, 70, 56], [59, 52, 60, 52], [66, 52, 68, 52],  // Hilltown
-  [128, 69, 143, 72], [126, 70, 127, 71],                    // airport terminal + tower
+  [128, 61, 143, 64], [126, 62, 127, 63],                    // airport terminal + tower
   [84, 78, 87, 79], [90, 82, 91, 83], [84, 88, 87, 89],      // city blocks near Central
 ];
 BLOCKS.forEach(r => forRect(r, t => { if (t.terrain === 'grass') t.terrain = 'block'; }));
 // airport pavement: runway, taxiway, link and apron
-const PAVED = [[126, 59, 156, 62], [128, 66, 154, 67], [125, 60, 129, 67], [127, 70, 145, 73]];
+const PAVED = [[126, 51, 156, 54], [128, 58, 154, 59], [125, 52, 129, 59], [130, 54, 134, 58], [127, 62, 145, 65]];
 PAVED.forEach(r => forRect(r, t => { if (t.terrain === 'grass') t.terrain = 'block'; }));
 
 // ---------- terrain mesh ----------
@@ -610,26 +610,27 @@ box(7, 3, 6, new THREE.MeshLambertMaterial({ color: 0x6f7c8a }), 51 * T, 1.5, 91
   label('Hilltown', 64 * T, 11, 56 * T);
 }
 // ---- airport ----
-const AIRPORT = { rwZ: 244, rwX0: 504, rwX1: 628, txZ: 268 };
+const AIRPORT = { rwZ: 212, rwX0: 504, rwX1: 628, txZ: 236, standX: 545 };
 {
   const A = AIRPORT;
   flat(A.rwX1 - A.rwX0, 15, MAT.runway, (A.rwX0 + A.rwX1) / 2, 0.04, A.rwZ);              // runway
   flat(A.rwX1 - A.rwX0 - 20, 7, MAT.runway, (A.rwX0 + A.rwX1) / 2, 0.04, A.txZ);          // taxiway
-  flat(16, 26, MAT.runway, A.rwX0 + 6, 0.04, (A.rwZ + A.txZ) / 2);                        // link
-  flat(70, 16, MAT.runway, 545, 0.04, 288);                                                // apron
+  flat(16, 13, MAT.runway, A.rwX0 + 6, 0.04, (A.rwZ + A.txZ) / 2 + 2);                    // holding point link
+  flat(18, 14, MAT.runway, 530, 0.04, 226);                                                // rapid-exit taxiway
+  flat(70, 16, MAT.runway, 545, 0.04, 256);                                                // apron
   for (let x = A.rwX0 + 12; x < A.rwX1 - 12; x += 12) flat(6, 0.7, MAT.markings, x, 0.06, A.rwZ);   // centreline
   for (const end of [A.rwX0 + 4, A.rwX1 - 4]) for (let i = -3; i <= 3; i++) flat(7, 0.9, MAT.markings, end, 0.06, A.rwZ + i * 1.8);  // thresholds
   const glassB = new THREE.MeshLambertMaterial({ color: 0x8fb8cf });
-  box(64, 8, 16, new THREE.MeshLambertMaterial({ color: 0xdfe3e6 }), 544, 4, 284);        // terminal
-  box(65, 0.6, 17, new THREE.MeshLambertMaterial({ color: 0x6e7681 }), 544, 8.3, 284);
-  box(62, 3.4, 0.5, glassB, 544, 3.4, 276.2);
-  box(5.5, 5.5, 5.5, new THREE.MeshLambertMaterial({ color: 0xc8ccd0 }), 508, 12, 282);   // control tower
-  box(6.5, 4, 6.5, glassB, 508, 16.5, 282);
-  box(7, 0.5, 7, MAT.dark, 508, 18.8, 282);
-  box(3.4, 24, 3.4, new THREE.MeshLambertMaterial({ color: 0xc8ccd0 }), 508, 12, 282);
+  box(64, 8, 16, new THREE.MeshLambertMaterial({ color: 0xdfe3e6 }), 544, 4, 252);        // terminal
+  box(65, 0.6, 17, new THREE.MeshLambertMaterial({ color: 0x6e7681 }), 544, 8.3, 252);
+  box(62, 3.4, 0.5, glassB, 544, 3.4, 244.2);
+  box(5.5, 5.5, 5.5, new THREE.MeshLambertMaterial({ color: 0xc8ccd0 }), 508, 12, 250);   // control tower
+  box(6.5, 4, 6.5, glassB, 508, 16.5, 250);
+  box(7, 0.5, 7, MAT.dark, 508, 18.8, 250);
+  box(3.4, 24, 3.4, new THREE.MeshLambertMaterial({ color: 0xc8ccd0 }), 508, 12, 250);
   // windsock
-  box(0.2, 6, 0.2, MAT.white, 496, 3, 252); const sock = new THREE.Mesh(new THREE.ConeGeometry(0.8, 3, 8), MAT.red); sock.position.set(497.6, 5.6, 252); sock.rotation.z = -Math.PI / 2; staticGroup.add(sock);
-  label('Airport', 545, 16, 268);
+  box(0.2, 6, 0.2, MAT.white, 496, 3, 220); const sock = new THREE.Mesh(new THREE.ConeGeometry(0.8, 3, 8), MAT.red); sock.position.set(497.6, 5.6, 220); sock.rotation.z = -Math.PI / 2; staticGroup.add(sock);
+  label('Airport', 545, 16, 236);
 }
 function buildAirliner(livery) {
   const F = new THREE.CylinderGeometry(1.5, 1.5, 22, 12); F.rotateZ(Math.PI / 2);
@@ -648,63 +649,90 @@ function buildAirliner(livery) {
     { geo: new THREE.CylinderGeometry(0.25, 0.25, 2.2, 6), c: 0x33363c, p: [6, -1.6, 0] },
   ]);
 }
+const PLANE_S = 0.55, PLANE_Y = 2.6 * PLANE_S;   // the airliners read far too large at full size
 const parkedPlanes = [];
 {
   const liveries = [0xd0342c, 0x2c6fd0, 0x2e8b57];
   liveries.forEach((lv, i) => {
     const m = new THREE.Mesh(buildAirliner(lv), MAT.painted); m.castShadow = true;
-    m.position.set(522 + i * 24, 2.6, 294); m.rotation.y = Math.PI / 2 + 0.35;
+    m.scale.setScalar(PLANE_S);
+    m.position.set(524 + i * 18, PLANE_Y, 262); m.rotation.y = Math.PI / 2 + 0.3;   // nose in to the terminal
     staticGroup.add(m); parkedPlanes.push(m);
   });
 }
 // one airliner working the runway: taxi, roll, climb out, come back on approach
-const flight = { mesh: new THREE.Mesh(buildAirliner(0xf0a032), MAT.painted), state: 'taxi', t: 0, x: 520, z: AIRPORT.txZ, y: 2.6, v: 0, hdg: 0 };
-flight.mesh.castShadow = true; scene.add(flight.mesh);
+const flight = { mesh: new THREE.Mesh(buildAirliner(0xf0a032), MAT.painted), state: 'taxi', t: 0, x: AIRPORT.standX, z: AIRPORT.txZ, y: PLANE_Y, v: 0, hdg: Math.PI };
+flight.mesh.castShadow = true; flight.mesh.scale.setScalar(PLANE_S); scene.add(flight.mesh);
 function updateFlight(dt) {
   const A = AIRPORT, f = flight;
-  if (f.state === 'taxi') {
-    f.v = Math.min(9, f.v + 6 * dt); f.x -= f.v * dt; f.y = 2.6; f.hdg = -Math.PI / 2;
-    if (f.x <= A.rwX0 + 10) { f.x = A.rwX0 + 10; f.z = A.rwZ; f.state = 'line'; f.t = 0; f.v = 0; }
-  } else if (f.state === 'line') {
-    f.z = lerp(f.z, A.rwZ, 1 - Math.pow(0.02, dt)); f.hdg = Math.PI / 2; f.t += dt;
-    if (f.t > 2.5) { f.state = 'roll'; f.t = 0; }
+  const px = f.x, pz = f.z;
+  if (f.state === 'taxi') {                       // west along the taxiway to the threshold
+    f.v = Math.min(9, f.v + 6 * dt); f.x -= f.v * dt; f.y = PLANE_Y;
+    if (f.x <= A.rwX0 + 10) { f.x = A.rwX0 + 10; f.state = 'line'; f.t = 0; f.v = 0; }
+  } else if (f.state === 'line') {                // pivot through 180 onto the runway heading
+    f.z = lerp(f.z, A.rwZ, 1 - Math.pow(0.04, dt));
+    f.hdg = lerp(f.hdg, 0, 1 - Math.pow(0.06, dt));
+    f.t += dt;
+    if (f.t > 3) { f.z = A.rwZ; f.hdg = 0; f.state = 'roll'; f.t = 0; }
   } else if (f.state === 'roll') {
-    f.v += 13 * dt; f.x += f.v * dt; f.hdg = Math.PI / 2;
+    f.v += 13 * dt; f.x += f.v * dt;
     if (f.v > 42) f.state = 'climb';
   } else if (f.state === 'climb') {
-    f.v = Math.min(70, f.v + 5 * dt); f.x += f.v * dt; f.y += 16 * dt; f.hdg = Math.PI / 2;
+    f.v = Math.min(70, f.v + 5 * dt); f.x += f.v * dt; f.y += 16 * dt;
     if (f.y > 120) { f.state = 'away'; f.t = 0; }
   } else if (f.state === 'away') {
-    f.t += dt; f.x += 60 * dt; if (f.t > 4) { f.state = 'approach'; f.x = A.rwX1 + 320; f.y = 90; f.v = 55; f.hdg = -Math.PI / 2; }
+    f.t += dt; f.x += 60 * dt;
+    if (f.t > 4) { f.state = 'approach'; f.x = A.rwX1 + 340; f.y = 95; f.v = 55; f.hdg = Math.PI; }
   } else if (f.state === 'approach') {
-    f.x -= f.v * dt; f.z = A.rwZ; f.y = Math.max(2.6, f.y - 12 * dt);
-    if (f.x <= A.rwX1 - 20 && f.y <= 3) { f.y = 2.6; f.state = 'brake'; }
+    // fly the glide path off the geometry, so it touches down ON the runway instead of floating past it
+    f.x -= f.v * dt; f.z = A.rwZ;
+    const touch = A.rwX1 - 25, start = A.rwX1 + 340;
+    f.y = lerp(95, PLANE_Y, clamp((start - f.x) / (start - touch), 0, 1));
+    if (f.x <= touch) { f.x = touch; f.y = PLANE_Y; f.state = 'brake'; }
   } else if (f.state === 'brake') {
-    f.v = Math.max(0, f.v - 22 * dt); f.x -= f.v * dt; f.hdg = -Math.PI / 2;
+    f.v = Math.max(0, f.v - 22 * dt); f.x -= f.v * dt;
     if (f.v <= 0.2) { f.state = 'vacate'; f.t = 0; }
-  } else if (f.state === 'vacate') {
-    f.z = lerp(f.z, A.txZ, 1 - Math.pow(0.05, dt)); f.t += dt;
-    if (f.t > 3) { f.state = 'return'; f.v = 0; }
-  } else if (f.state === 'return') {
-    f.v = Math.min(9, f.v + 5 * dt); f.x += f.v * dt; f.hdg = Math.PI / 2;
-    if (f.x > 600) { f.x = 520; f.state = 'taxi'; f.v = 0; }
+  } else if (f.state === 'vacate') {              // roll off the runway onto the taxiway
+    f.z = lerp(f.z, A.txZ, 1 - Math.pow(0.06, dt)); f.x -= 5 * dt; f.t += dt;
+    if (f.t > 3) { f.z = A.txZ; f.state = 'return'; f.v = 0; }
+  } else if (f.state === 'return') {              // taxi back to the stand, from whichever side
+    const dir = Math.sign(A.standX - f.x);
+    f.v = Math.min(9, f.v + 5 * dt); f.x += dir * f.v * dt;
+    if (Math.abs(f.x - A.standX) < 1.2) { f.x = A.standX; f.state = 'hold'; f.t = 0; f.v = 0; }
+  } else if (f.state === 'hold') {                // a few seconds on stand, then round again
+    f.t += dt; if (f.t > 6) { f.state = 'taxi'; f.v = 0; }
+  }
+  // Runway phases hold an exact heading; on the ground the nose follows the actual
+  // direction of travel, so turns onto and off the runway read as turns, not slides.
+  if (f.state === 'roll' || f.state === 'climb' || f.state === 'away') f.hdg = 0;
+  else if (f.state === 'approach' || f.state === 'brake') f.hdg = Math.PI;
+  else if (f.state !== 'line') {
+    const dx = f.x - px, dz = f.z - pz, d = Math.hypot(dx, dz);
+    if (d > 1e-4) {
+      const want = Math.atan2(-dz, dx);
+      let diff = want - f.hdg;
+      while (diff > Math.PI) diff -= 2 * Math.PI;
+      while (diff < -Math.PI) diff += 2 * Math.PI;
+      f.hdg += diff * (1 - Math.pow(0.12, dt));
+    }
   }
   const climbing = f.state === 'climb' || f.state === 'away';
   f.mesh.position.set(f.x, f.y, f.z);
-  f.mesh.rotation.set(0, f.hdg, climbing ? -0.22 : (f.state === 'approach' ? 0.06 : 0));
+  f.mesh.rotation.set(0, f.hdg, climbing ? 0.22 : (f.state === 'approach' ? 0.05 : 0));
 }
 // ---- trees, instanced so thousands cost three draw calls ----
 const treeSlots = [];
 {
   const spots = [];
-  const nearTrack = t => {
+  const nearBuilt = t => {
     for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
-      const n = tileAt(t.x + dx, t.z + dz); if (n && (n.paths.length || n.place)) return true;
+      const n = tileAt(t.x + dx, t.z + dz);
+      if (n && (n.paths.length || n.place || n.terrain === 'block')) return true;   // track, platforms, pavement
     }
     return false;
   };
   for (const row of tiles) for (const t of row) {
-    if (t.terrain !== 'grass' || nearTrack(t)) continue;
+    if (t.terrain !== 'grass' || nearBuilt(t)) continue;
     if (rnd() < 0.075) spots.push(t);
   }
   const trunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 1.6, 6), coneGeo = new THREE.ConeGeometry(1.4, 2.8, 7);
