@@ -109,6 +109,7 @@
     <button class="tb" data-tool="track"><span class="ic">🛤️</span><span class="lbl">Lay Track</span><kbd>2</kbd></button>
     <button class="tb" data-tool="signal"><span class="ic">🚦</span><span class="lbl">Signal</span><kbd>3</kbd></button>
     <button class="tb" data-tool="erase"><span class="ic">🧹</span><span class="lbl">Erase</span><kbd>4</kbd></button>
+    <button class="tb" data-tool="move"><span class="ic">✈️</span><span class="lbl">Move Airport</span><kbd>5</kbd></button>
     <label class="chk"><input type="checkbox" id="autoRoute" checked> Auto-set switches</label>
     <button class="tb" id="btnUndo" title="Nothing to undo"><span class="ic">↩</span><span class="lbl">Undo</span></button>
     <div id="status">Drag to lay track.</div>
@@ -165,6 +166,7 @@
       <li><kbd>3</kbd> <b>Signal</b>: click near the end of a track piece to place a signal (starts red). Click a signal any time to toggle red / green.</li>
       <li><kbd>1</kbd> <b>Select</b>: click a switch to throw it, click a train to open its control panel and send it somewhere.</li>
       <li><kbd>4</kbd> <b>Erase</b>: remove track or signals (half refund).</li>
+      <li><kbd>5</kbd> <b>Move Airport</b>: drag the whole airport, car park and rail stop included, anywhere it fits. The outline turns red where it will not go. Free, and undoable.</li>
       <li><b>Undo</b> (the ↩ button or <kbd>Ctrl</kbd>+<kbd>Z</kbd>): takes back the last thing you built, erased or rotated, and returns exactly what it cost. Undoing is always free, and you can keep going back through your recent changes.</li>
       <li>Camera: left-drag orbit, right-drag or <kbd>Shift</kbd>+drag pan, wheel zoom, <kbd>W A S D</kbd> move, <kbd>Q</kbd>/<kbd>E</kbd> rotate.</li>
       <li>On a touchscreen: one finger orbits (or lays track), <b>two fingers pinch to zoom and drag to move around the island</b>. The + and − buttons zoom as well, and 🚂 opens the train list.</li>
@@ -183,7 +185,7 @@ if (typeof THREE === 'undefined') { document.getElementById('help').innerHTML = 
 
 // ---------- constants & helpers ----------
 // App version. Bump by 0.01 on every update (see CHANGELOG.md).
-const VERSION = '1.03';
+const VERSION = '1.04';
 const T = 4;                 // tile size in world units
 const MAPW = 168, MAPH = 168;  // tiles — 6x the old 28, with landmarks only spread 2x, leaving room for the city to grow
 const DX = [0, 1, 0, -1], DZ = [-1, 0, 1, 0];       // N E S W
@@ -370,7 +372,7 @@ const PLACES = [
   { id: 'harbour', name: 'Harbour', stop: [152, 94], icon: '⚓' },
   { id: 'quarry', name: 'Quarry', stop: [96, 108], icon: '⛏️' },
   { id: 'hilltown', name: 'Hilltown', stop: [64, 60], icon: '🏘️' },
-  { id: 'airport', name: 'Airport', stop: [122, 66], icon: '✈️' },
+  { id: 'airport', name: 'Airport', stop: [121, 68], icon: '✈️' },   // moved by apRail whenever the airport is dragged
   { id: 'yard1', name: 'Yard Road 1', stop: [70, 90], yard: true, icon: '🏗️' },
   { id: 'yard2', name: 'Yard Road 2', stop: [70, 92], yard: true, icon: '🏗️' },
   { id: 'yard3', name: 'Yard Road 3', stop: [70, 94], yard: true, icon: '🏗️' },
@@ -401,7 +403,6 @@ for (const z of [90, 92, 94]) for (let x = 59; x <= 76; x++) lay(x, z, E, Wn, tr
 for (let x = 146; x <= 152; x++) lay(x, 94, E, Wn, x >= 148 && x <= 150);   // harbour
 for (let x = 93; x <= 99; x++) lay(x, 108, E, Wn, x >= 95 && x <= 97);      // quarry
 for (let x = 61; x <= 67; x++) lay(x, 60, E, Wn, x >= 63 && x <= 65);       // hilltown
-for (let x = 119; x <= 125; x++) lay(x, 66, E, Wn, x >= 121 && x <= 123);   // airport
 tileAt(58, 85).signals[N] = { state: 'red' };   // yard exit signal
 
 // building footprints — track cannot be laid through these
@@ -411,13 +412,11 @@ const BLOCKS = [
   [153, 84, 159, 103],                                        // harbour quay and sheds
   [92, 110, 104, 112],                                        // quarry works
   [58, 54, 62, 57], [64, 54, 70, 56], [59, 52, 60, 52], [66, 52, 68, 52],  // Hilltown
-  [128, 61, 143, 64], [126, 62, 127, 63],                    // airport terminal + tower
   [84, 78, 87, 79], [90, 82, 91, 83], [84, 88, 87, 89],      // city blocks near Central
 ];
 BLOCKS.forEach(r => forRect(r, t => { if (t.terrain === 'grass') t.terrain = 'block'; }));
 // airport pavement: runway, taxiway, link and apron
-const PAVED = [[126, 51, 156, 54], [128, 58, 154, 59], [125, 52, 129, 59], [130, 54, 134, 58], [127, 62, 145, 65]];
-PAVED.forEach(r => forRect(r, t => { if (t.terrain === 'grass') t.terrain = 'block'; }));
+// the airport stamps its own tiles once it is built (see apMark)
 
 // ---------- terrain mesh ----------
 // Signed distance to the hills as a tile-grid chamfer transform: O(tiles). The old
@@ -679,28 +678,126 @@ function updateShips(dt) {
     }
   label('Hilltown', 64 * T, 11, 56 * T);
 }
-// ---- airport ----
-const AIRPORT = { rwZ: 212, rwX0: 504, rwX1: 628, txZ: 236, standX: 545 };
+// ---- airport: one movable complex, built entirely in local coordinates ----
+// Everything lives inside airportGroup, so relocating it is a single position change.
+// AIRPORT's figures are local to that group, which is why updateFlight needs no rework.
+const AIRPORT = { rwZ: 8, rwX0: 28, rwX1: 152, txZ: 32, standX: 69 };
+const AP = { x: 118, z: 40 };                 // anchor tile, north-west corner of the footprint
+const AP_FOOT = { w: 39, h: 28 };             // tiles
+const AP_PAVED = [[7, 0, 38, 3], [9, 7, 35, 8], [6, 3, 10, 7], [9, 3, 15, 7], [8, 9, 26, 13], [9, 19, 24, 23]];
+const AP_BUILT = [[9, 13, 24, 17], [8, 10, 8, 10]];
+const AP_RAIL = { z: 27, x0: 0, x1: 7, stopX: 3 };
+const airportGroup = new THREE.Group();
+airportGroup.position.set(AP.x * T, 0, AP.z * T);
+scene.add(airportGroup);
 {
-  const A = AIRPORT;
-  flat(A.rwX1 - A.rwX0, 15, MAT.runway, (A.rwX0 + A.rwX1) / 2, 0.04, A.rwZ);              // runway
-  flat(A.rwX1 - A.rwX0 - 20, 7, MAT.runway, (A.rwX0 + A.rwX1) / 2, 0.04, A.txZ);          // taxiway
-  flat(16, 13, MAT.runway, A.rwX0 + 6, 0.04, (A.rwZ + A.txZ) / 2 + 2);                    // holding point link
-  flat(18, 14, MAT.runway, 530, 0.04, 226);                                                // rapid-exit taxiway
-  flat(70, 16, MAT.runway, 545, 0.04, 256);                                                // apron
-  for (let x = A.rwX0 + 12; x < A.rwX1 - 12; x += 12) flat(6, 0.7, MAT.markings, x, 0.06, A.rwZ);   // centreline
-  for (const end of [A.rwX0 + 4, A.rwX1 - 4]) for (let i = -3; i <= 3; i++) flat(7, 0.9, MAT.markings, end, 0.06, A.rwZ + i * 1.8);  // thresholds
+  const A = AIRPORT, G = airportGroup;
+  const lbox = (w, h, d, mat, x, y, z) => box(w, h, d, mat, x, y, z, G);
+  const lflat = (w, d, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, d), mat); m.rotation.x = -Math.PI / 2; m.position.set(x, y, z); m.receiveShadow = true; G.add(m); return m; };
+  lflat(A.rwX1 - A.rwX0, 15, MAT.runway, (A.rwX0 + A.rwX1) / 2, 0.04, A.rwZ);            // runway
+  lflat(A.rwX1 - A.rwX0 - 20, 7, MAT.runway, (A.rwX0 + A.rwX1) / 2, 0.04, A.txZ);        // taxiway
+  lflat(16, 13, MAT.runway, A.rwX0 + 6, 0.04, (A.rwZ + A.txZ) / 2 + 2);                  // holding point link
+  lflat(24, 14, MAT.runway, 51, 0.04, 22);                                               // rapid-exit taxiway
+  lflat(70, 18, MAT.runway, 69, 0.04, 46);                                               // apron, airside of the terminal
+  for (let x = A.rwX0 + 12; x < A.rwX1 - 12; x += 12) lflat(6, 0.7, MAT.markings, x, 0.06, A.rwZ);
+  for (const end of [A.rwX0 + 4, A.rwX1 - 4]) for (let i = -3; i <= 3; i++) lflat(7, 0.9, MAT.markings, end, 0.06, A.rwZ + i * 1.8);
   const glassB = new THREE.MeshLambertMaterial({ color: 0x8fb8cf });
-  box(64, 8, 16, new THREE.MeshLambertMaterial({ color: 0xdfe3e6 }), 544, 4, 252);        // terminal
-  box(65, 0.6, 17, new THREE.MeshLambertMaterial({ color: 0x6e7681 }), 544, 8.3, 252);
-  box(62, 3.4, 0.5, glassB, 544, 3.4, 244.2);
-  box(5.5, 5.5, 5.5, new THREE.MeshLambertMaterial({ color: 0xc8ccd0 }), 508, 12, 250);   // control tower
-  box(6.5, 4, 6.5, glassB, 508, 16.5, 250);
-  box(7, 0.5, 7, MAT.dark, 508, 18.8, 250);
-  box(3.4, 24, 3.4, new THREE.MeshLambertMaterial({ color: 0xc8ccd0 }), 508, 12, 250);
-  // windsock
-  box(0.2, 6, 0.2, MAT.white, 496, 3, 220); const sock = new THREE.Mesh(new THREE.ConeGeometry(0.8, 3, 8), MAT.red); sock.position.set(497.6, 5.6, 220); sock.rotation.z = -Math.PI / 2; staticGroup.add(sock);
-  label('Airport', 545, 16, 236);
+  lbox(64, 8, 16, new THREE.MeshLambertMaterial({ color: 0xdfe3e6 }), 68, 4, 62);        // terminal
+  lbox(65, 0.6, 17, new THREE.MeshLambertMaterial({ color: 0x6e7681 }), 68, 8.3, 62);
+  lbox(62, 3.4, 0.5, glassB, 68, 3.4, 54.2);                                             // airside frontage
+  lbox(62, 3.4, 0.5, glassB, 68, 3.4, 69.8);                                             // landside frontage
+  lbox(5.5, 5.5, 5.5, new THREE.MeshLambertMaterial({ color: 0xc8ccd0 }), 32, 12, 42);   // control tower
+  lbox(6.5, 4, 6.5, glassB, 32, 16.5, 42);
+  lbox(7, 0.5, 7, MAT.dark, 32, 18.8, 42);
+  lbox(3.4, 24, 3.4, new THREE.MeshLambertMaterial({ color: 0xc8ccd0 }), 32, 12, 42);
+  lbox(0.2, 6, 0.2, MAT.white, 20, 3, 16);                                                // windsock
+  const sock = new THREE.Mesh(new THREE.ConeGeometry(0.8, 3, 8), MAT.red);
+  sock.position.set(21.6, 5.6, 16); sock.rotation.z = -Math.PI / 2; G.add(sock);
+  // ---- car park ----
+  lflat(64, 20, MAT.asphalt, 68, 0.05, 86);                                               // car park tarmac
+  for (const kz of [76, 96]) lbox(64, 0.5, 0.6, new THREE.MeshLambertMaterial({ color: 0xb8b4a8 }), 68, 0.25, kz);   // kerbs
+  for (let x = 39; x <= 97; x += 5.2) {                                                    // bay markings, two rows off a central aisle
+    lflat(0.22, 8, MAT.markings, x, 0.07, 80.5);
+    lflat(0.22, 8, MAT.markings, x, 0.07, 91.5);
+  }
+  lflat(64, 0.3, MAT.markings, 68, 0.07, 86);                                              // aisle centre line
+  lflat(5, 8, MAT.markings, 68, 0.07, 73);                                                 // walkway to the terminal
+  for (let z = 70; z <= 76; z += 2.2) lflat(4.4, 0.7, MAT.asphalt, 68, 0.08, z);            // zebra stripes
+  for (const [lx, lz] of [[42, 76.5], [68, 76.5], [94, 76.5], [42, 95.5], [68, 95.5], [94, 95.5]]) {
+    lbox(0.28, 7, 0.28, new THREE.MeshLambertMaterial({ color: 0x50555c }), lx, 3.5, lz);  // lamp columns
+    lbox(1.8, 0.3, 0.6, new THREE.MeshLambertMaterial({ color: 0xf0eede }), lx, 7.1, lz);
+  }
+  lflat(10, 26, MAT.asphalt, 34, 0.05, 86);                                                // access lane off the west side
+  for (let z = 76; z <= 96; z += 5) lflat(0.22, 2.4, MAT.dash, 34, 0.07, z);
+}
+{  // the sign belongs to the group so it travels with the airport
+  const sp = makeLabel('Airport'); sp.position.set(69, 16, 30); airportGroup.add(sp);
+}
+// bays filled once the vehicle catalogue exists (it is defined further down)
+const carParkCars = [];
+function populateCarPark() {
+  const rows = [[80.5, -Math.PI / 2], [91.5, Math.PI / 2]];
+  for (const [rz, ry] of rows) {
+    for (let x = 41.6; x <= 95; x += 5.2) {
+      if (rnd() < 0.3) continue;                                    // some bays empty
+      const spec = VEHICLES[Math.floor(rnd() * VEHICLES.length)];
+      if (spec.len > 6) continue;                                   // buses and lorries do not use the car park
+      const m = new THREE.Mesh(buildVehicle(spec, CAR_COLOURS[Math.floor(rnd() * CAR_COLOURS.length)]), MAT.painted);
+      m.castShadow = true; m.position.set(x, 0, rz + (ry > 0 ? -0.6 : 0.6)); m.rotation.y = ry;
+      airportGroup.add(m); carParkCars.push(m);
+    }
+  }
+}
+// ---- stamping the airport onto the tile grid, and moving it ----
+function apEachTile(fn) {
+  for (const [a0, b0, c0, d0] of [...AP_PAVED, ...AP_BUILT])
+    for (let z = b0; z <= d0; z++) for (let x = a0; x <= c0; x++) {
+      const t = tileAt(AP.x + x, AP.z + z); if (t) fn(t);
+    }
+}
+function apMark(on) {
+  apEachTile(t => {
+    if (on) { if (t.terrain === 'grass') { t.terrain = 'block'; t.apPaved = true; clearTree(t); } }
+    else if (t.apPaved) { t.terrain = 'grass'; t.apPaved = false; restoreTree(t); }
+  });
+}
+function apRail(on) {
+  const pl = placeById('airport');
+  if (!on && pl.tile) pl.tile.place = null;
+  for (let i = AP_RAIL.x0; i <= AP_RAIL.x1; i++) {
+    const tx = AP.x + i, tz = AP.z + AP_RAIL.z, t = tileAt(tx, tz); if (!t) continue;
+    if (on) { t.locked = false; t.paths = []; lay(tx, tz, E, Wn, i >= 2 && i <= 4); }
+    else { t.locked = false; t.paths = []; t.sw = null; t.signals = {}; }
+    rebuildTile(t);
+  }
+  if (on) { pl.stop = [AP.x + AP_RAIL.stopX, AP.z + AP_RAIL.z]; pl.tile = tileAt(pl.stop[0], pl.stop[1]); if (pl.tile) pl.tile.place = pl; }
+}
+function apBlockers(nx, nz) {
+  if (nx < LAND0 || nz < LAND0 || nx + AP_FOOT.w - 1 > LAND1 || nz + AP_FOOT.h - 1 > LAND1) return 'The airport has to stay on the island';
+  const rects = [...AP_PAVED, ...AP_BUILT, [AP_RAIL.x0, AP_RAIL.z, AP_RAIL.x1, AP_RAIL.z]];
+  for (const [a0, b0, c0, d0] of rects)
+    for (let z = b0; z <= d0; z++) for (let x = a0; x <= c0; x++) {
+      const t = tileAt(nx + x, nz + z);
+      if (!t) return 'The airport has to stay on the island';
+      // its own ground: paved tiles, and the rail stub it is standing on right now
+      const ownStub = t.z === AP.z + AP_RAIL.z && t.x >= AP.x + AP_RAIL.x0 && t.x <= AP.x + AP_RAIL.x1;
+      if (t.apPaved || ownStub) continue;
+      if (t.terrain === 'water') return 'Airports do not float';
+      if (t.terrain === 'hill') return 'The ground there is not level';
+      if (t.terrain === 'road') return 'A road runs through there';
+      if (t.terrain === 'block') return 'Something is already built there';
+      if (t.paths.length) return 'There is track in the way';
+      if (t.place) return 'Another destination is in the way';
+      if (occupancy.has(key(t.x, t.z))) return 'A train is in the way';
+    }
+  return null;
+}
+function moveAirportTo(nx, nz) {
+  apRail(false); apMark(false);
+  AP.x = nx; AP.z = nz;
+  apMark(true); apRail(true);
+  airportGroup.position.set(AP.x * T, 0, AP.z * T);
+  afterTrackChange();
 }
 function buildAirliner(livery) {
   const F = new THREE.CylinderGeometry(1.5, 1.5, 22, 12); F.rotateZ(Math.PI / 2);
@@ -726,13 +823,13 @@ const parkedPlanes = [];
   liveries.forEach((lv, i) => {
     const m = new THREE.Mesh(buildAirliner(lv), MAT.painted); m.castShadow = true;
     m.scale.setScalar(PLANE_S);
-    m.position.set(524 + i * 18, PLANE_Y, 262); m.rotation.y = Math.PI / 2 + 0.3;   // nose in to the terminal
-    staticGroup.add(m); parkedPlanes.push(m);
+    m.position.set(48 + i * 18, PLANE_Y, 44); m.rotation.y = Math.PI / 2 + 0.3;   // nose in to the terminal
+    airportGroup.add(m); parkedPlanes.push(m);
   });
 }
 // one airliner working the runway: taxi, roll, climb out, come back on approach
 const flight = { mesh: new THREE.Mesh(buildAirliner(0xf0a032), MAT.painted), state: 'taxi', t: 0, x: AIRPORT.standX, z: AIRPORT.txZ, y: PLANE_Y, v: 0, hdg: Math.PI };
-flight.mesh.castShadow = true; flight.mesh.scale.setScalar(PLANE_S); scene.add(flight.mesh);
+flight.mesh.castShadow = true; flight.mesh.scale.setScalar(PLANE_S); airportGroup.add(flight.mesh);
 function updateFlight(dt) {
   const A = AIRPORT, f = flight;
   const px = f.x, pz = f.z;
@@ -1380,15 +1477,22 @@ function pushUndo(label, tileList) {
   while (undoStack.length > UNDO_MAX) undoStack.shift();
   updateUndoButton();
 }
+function pushUndoFn(label, undoFn, canUndo) {
+  undoStack.push({ label, money: game.money, tiles: [], undoFn, canUndo });
+  while (undoStack.length > UNDO_MAX) undoStack.shift();
+  updateUndoButton();
+}
 function undo() {
   const u = undoStack[undoStack.length - 1];
   if (!u) { toast('Nothing to undo'); return; }
+  if (u.canUndo && !u.canUndo()) { toast('That cannot be undone now — the space is taken', 'bad'); return; }
   for (const sn of u.tiles) {                       // never pull track out from under a train
     const differs = sn.paths.length !== sn.t.paths.length || sn.paths.some((p, i) => p !== sn.t.paths[i]);
     if (differs && occupancy.has(key(sn.t.x, sn.t.z))) { toast('A train is on that track — move it first', 'bad'); return; }
   }
   undoStack.pop();
   const back = u.money - game.money;
+  if (u.undoFn) u.undoFn();
   for (const sn of u.tiles) {
     const t = sn.t;
     t.paths = sn.paths.slice();
@@ -1504,7 +1608,7 @@ $('btnHelp').onclick = () => $('help').style.display = 'flex';
 $('btnStart').onclick = () => { $('help').style.display = 'none'; if (document.body.classList.contains('touch')) toast('Two fingers: drag to move, pinch to zoom'); };
 $('autoRoute').onchange = e => { game.autoRoute = e.target.checked; };
 function selectTrain(tr) { game.selected = tr; if (tr) { $('help').style.display = 'none'; document.body.classList.add('panel-open'); $('panelToggle').classList.add('on'); } renderTrainList(); }
-function setTool(t) { game.tool = t; document.querySelectorAll('#tools .tb[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === t)); $('status').textContent = { select: 'Tap switches, signals and trains.', track: 'Drag to lay track, tap to rotate.', signal: 'Tap near the end of a track piece.', erase: 'Tap track or a signal to remove it.' }[t]; canvas.style.cursor = t === 'track' ? 'cell' : t === 'erase' ? 'not-allowed' : 'pointer'; drawPath = null; clearGhosts(); }
+function setTool(t) { game.tool = t; document.querySelectorAll('#tools .tb[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === t)); $('status').textContent = { select: 'Tap switches, signals and trains.', track: 'Drag to lay track, tap to rotate.', signal: 'Tap near the end of a track piece.', erase: 'Tap track or a signal to remove it.', move: 'Drag the airport to a new spot.' }[t]; canvas.style.cursor = t === 'track' ? 'cell' : t === 'erase' ? 'not-allowed' : t === 'move' ? 'move' : 'pointer'; drawPath = null; clearGhosts(); }
 document.querySelectorAll('#tools .tb[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
 
 // ---------- input ----------
@@ -1521,7 +1625,21 @@ function pick(ev) {
   const hg = raycaster.intersectObject(ground); if (hg.length) { const p = hg[0].point; const t = tileAt(Math.floor(p.x / T), Math.floor(p.z / T)); if (t) { res.tile = t; res.local = new THREE.Vector3(p.x - t.x * T - 2, 0, p.z - t.z * T - 2); } }
   return res;
 }
-let drag = null, drawPath = null, pinch = null, suppressClick = false;
+let drag = null, drawPath = null, pinch = null, suppressClick = false, apDrag = null;
+// a translucent footprint that follows the cursor while the airport is being placed
+const apGhost = new THREE.Group(); apGhost.visible = false; scene.add(apGhost);
+for (const [a0, b0, c0, d0] of [...AP_PAVED, ...AP_BUILT, [AP_RAIL.x0, AP_RAIL.z, AP_RAIL.x1, AP_RAIL.z]]) {
+  const w = (c0 - a0 + 1) * T, h = (d0 - b0 + 1) * T;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), MAT.ghostOk);
+  m.rotation.x = -Math.PI / 2; m.position.set(a0 * T + w / 2, 0.3, b0 * T + h / 2);
+  apGhost.add(m);
+}
+function showApGhost(nx, nz, ok) {
+  apGhost.position.set(nx * T, 0, nz * T); apGhost.visible = true;
+  for (const m of apGhost.children) m.material = ok ? MAT.ghostOk : MAT.ghostBad;
+}
+const overAirport = t => t && t.x >= AP.x && t.x < AP.x + AP_FOOT.w && t.z >= AP.z && t.z < AP.z + AP_FOOT.h;
+function cancelApDrag() { apDrag = null; apGhost.visible = false; }
 const pointers = new Map();
 function panCamera(dx, dy) {
   // world units per pixel at the target plane, so the ground tracks the finger on any screen
@@ -1540,10 +1658,15 @@ canvas.addEventListener('pointerdown', ev => {
   canvas.setPointerCapture(ev.pointerId);
   pointers.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
   $('help').style.display = 'none';
-  if (pointers.size === 2) { cancelDraw(); drag = null; suppressClick = true; pinch = pinchState(); return; }
+  if (pointers.size === 2) { cancelDraw(); cancelApDrag(); drag = null; suppressClick = true; pinch = pinchState(); return; }
   if (pointers.size > 2) return;
   drag = { x: ev.clientX, y: ev.clientY, sx: ev.clientX, sy: ev.clientY, button: ev.button, moved: false, pan: ev.button === 2 || ev.button === 1 || ev.shiftKey };
   if (ev.button === 0 && !ev.shiftKey && game.tool === 'track') { const p = pick(ev); if (p.tile) { drawPath = [p.tile]; drag = null; showPathGhost(); } }
+  if (ev.button === 0 && !ev.shiftKey && game.tool === 'move') {
+    const p = pick(ev);
+    if (overAirport(p.tile)) { apDrag = { ox: p.tile.x - AP.x, oz: p.tile.z - AP.z, nx: AP.x, nz: AP.z, err: null }; drag = null; showApGhost(AP.x, AP.z, true); }
+    else if (p.tile) $('status').textContent = 'Grab the airport itself to move it';
+  }
 });
 canvas.addEventListener('pointermove', ev => {
   const pt = pointers.get(ev.pointerId); if (pt) { pt.x = ev.clientX; pt.y = ev.clientY; }
@@ -1552,6 +1675,16 @@ canvas.addEventListener('pointermove', ev => {
       const n = pinchState();
       if (pinch) { if (n.d > 0 && pinch.d > 0) zoomBy(pinch.d / n.d); panCamera(n.cx - pinch.cx, n.cy - pinch.cy); }
       pinch = n;
+    }
+    return;
+  }
+  if (apDrag) {
+    const p = pick(ev);
+    if (p.tile) {
+      const nx = p.tile.x - apDrag.ox, nz = p.tile.z - apDrag.oz;
+      apDrag.nx = nx; apDrag.nz = nz; apDrag.err = apBlockers(nx, nz);
+      showApGhost(nx, nz, !apDrag.err);
+      $('status').textContent = apDrag.err ? '✖ ' + apDrag.err : 'Release to set the airport down';
     }
     return;
   }
@@ -1568,7 +1701,20 @@ canvas.addEventListener('pointermove', ev => {
 function endPointer(ev) {
   if (!pointers.delete(ev.pointerId)) return;
   if (pointers.size < 2) pinch = null;
-  if (pointers.size > 0) { drag = null; cancelDraw(); return; }   // lifting one of two: don't jump
+  if (pointers.size > 0) { drag = null; cancelDraw(); cancelApDrag(); return; }   // lifting one of two: don't jump
+  if (apDrag) {
+    const d = apDrag; cancelApDrag(); suppressClick = false;
+    if (d.nx !== AP.x || d.nz !== AP.z) {
+      if (d.err) toast(d.err, 'bad');
+      else {
+        const from = { x: AP.x, z: AP.z };
+        pushUndoFn('moving the airport', () => moveAirportTo(from.x, from.z), () => !apBlockers(from.x, from.z));
+        moveAirportTo(d.nx, d.nz);
+        toast('Airport moved — its rail stop came with it', 'good');
+      }
+    }
+    setTool('move'); return;
+  }
   if (drawPath) { commitPath(); drawPath = null; clearGhosts(); suppressClick = false; return; }
   const d = drag, sc = suppressClick; drag = null; suppressClick = false;
   if (d && !d.moved && d.button === 0 && !d.pan && !sc) click(ev);
@@ -1629,7 +1775,7 @@ function click(ev) {
 const keys = {};
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return; keys[e.key.toLowerCase()] = true;
-  if (e.key === '1') setTool('select'); if (e.key === '2') setTool('track'); if (e.key === '3') setTool('signal'); if (e.key === '4') setTool('erase');
+  if (e.key === '1') setTool('select'); if (e.key === '2') setTool('track'); if (e.key === '3') setTool('signal'); if (e.key === '4') setTool('erase'); if (e.key === '5') setTool('move');
   if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); undo(); }
   if (e.key === 'Escape') { setTool('select'); selectTrain(null); $('help').style.display = 'none'; }
   if (e.key === 'h' || e.key === 'H') $('help').style.display = $('help').style.display === 'none' ? 'flex' : 'none';
@@ -1638,6 +1784,7 @@ addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
 // ---------- main loop ----------
 for (const row of tiles) for (const t of row) if (t.paths.length || Object.keys(t.signals).length) rebuildTile(t);
+apMark(true); apRail(true); populateCarPark();
 afterTrackChange(); setTool('select'); renderTrainList(); updateUndoButton();
 $('ver').textContent = 'v' + VERSION;
 $('helpVer').textContent = 'v' + VERSION;
@@ -1659,7 +1806,7 @@ function frame(now) {
 }
 requestAnimationFrame(frame);
 // debug / modding hooks
-window.IslandRail = { VERSION, undo, undoStack, pushUndo, removeSignal, updateShips, updateFlight, SHIPS, PORT, cam, updateCamera, panCamera, zoomBy, pointers, INTERSECTIONS, ROADS, roadCars, flight, AIRPORT, DESTINATIONS, updateTrains, updateRoads, updateTerrain, crash, placeSignal, rotateTile, game, trains, tiles, tileAt, PLACES, placeById, planFromPath, evaluatePlan, applyTrack, dispatch, toggleSignal, setSwitch, eraseTile, findRoute, lookahead };
+window.IslandRail = { VERSION, pushUndoFn, AP, AP_FOOT, apBlockers, moveAirportTo, airportGroup, carParkCars, undo, undoStack, pushUndo, removeSignal, updateShips, updateFlight, SHIPS, PORT, cam, updateCamera, panCamera, zoomBy, pointers, INTERSECTIONS, ROADS, roadCars, flight, AIRPORT, DESTINATIONS, updateTrains, updateRoads, updateTerrain, crash, placeSignal, rotateTile, game, trains, tiles, tileAt, PLACES, placeById, planFromPath, evaluatePlan, applyTrack, dispatch, toggleSignal, setSwitch, eraseTile, findRoute, lookahead };
 </script>
 </body>
 </html>

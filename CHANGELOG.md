@@ -10,6 +10,25 @@ change it describes, and add a section here.
 
 ---
 
+## v1.04
+
+- **Car park.** The airport now has one on the landside of the terminal: marked bays in two
+  rows off a central aisle, kerbs, lamp columns, an access lane, and a zebra crossing to
+  the terminal doors. Cars and vans fill about seventy percent of the bays; buses and
+  lorries stay out of it.
+- **The airport can be dragged.** A new Move Airport tool (key 5) picks up the whole
+  complex, runway, taxiways, apron, terminal, tower, car park, parked aircraft and the rail
+  stop included, and sets it down anywhere it fits. Moving is free and undoable.
+- The outline follows the cursor and turns red where it will not go, naming the reason:
+  water, sloping ground, a road, an existing building, track in the way, another
+  destination, or a train standing in it.
+- The rail stop travels with the airport. Track a player laid up to the old stop stays put,
+  so a line may need extending to the new one.
+- Rearranged the terminal properly while doing this: the apron and parked aircraft are now
+  airside, north of the building, with the car park landside to the south.
+- Internally the airport was rebuilt in local coordinates inside one group, which is what
+  makes moving it a single position change rather than a rewrite of every coordinate.
+
 ## v1.03
 
 - **Undo.** The ↩ button beside the tools, or Ctrl+Z, takes back the last thing you built,

@@ -16,7 +16,7 @@ actions in one place — KPIs, charts, and sortable/searchable tables.
 `train-set/index.html` is a self-contained 3D train-set game (three.js, no build
 step). Open it directly or serve the repo and visit `/train-set/`.
 
-Currently **v1.03** — see [`CHANGELOG.md`](CHANGELOG.md). The version shows in the
+Currently **v1.04** — see [`CHANGELOG.md`](CHANGELOG.md). The version shows in the
 heads-up display and the help overlay, and rises by 0.01 with each update.
 
 - Starts with **Central Station** and a three-road **holding yard** with trains parked.
@@ -27,7 +27,8 @@ heads-up display and the help overlay, and rises by 0.01 with each update.
   becomes a tunnel with portals (both cost extra).
 - Four streets meet at **signalled intersections**. Cars, vans, buses and trucks queue at
   red, show brake lights, and pull away on green.
-- The **airport** has a working runway: an airliner taxis, takes off, and comes back on
+- The **airport** can be picked up and dragged anywhere it fits, car park and rail stop
+  included, and has a working runway: an airliner taxis, takes off, and comes back on
   approach, with more parked on the apron.
 - Trains **obey the track controls**: red signals, switch settings, trains ahead,
   curve speed limits. Two trains on one tile is a crash.
